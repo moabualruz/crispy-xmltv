@@ -68,8 +68,8 @@ Intentional omissions or non-goals:
 - writing preserves structured meaning, not byte-for-byte source formatting
 
 Writer/parser validation notes:
-- programme parsing rejects malformed required `start` / `channel` attributes and invalid XMLTV timestamps
-- writer serialization is fallible and rejects invalid programmes instead of emitting malformed XMLTV
+- programme parsing rejects malformed required `start` / `channel` attributes and invalid XMLTV timestamps, while accepting supported named timezone suffixes such as `BST`
+- writer serialization is fallible and rejects invalid programmes, blank channel ids, and empty or invalid reviews instead of emitting malformed XMLTV
 - `<length>` values preserve explicit XMLTV units; legacy unit-less lengths are normalized to minutes on parse
 
 ## Typical Uses

@@ -5,9 +5,11 @@
 //! parse/write/parse round-trips.
 //!
 //! Supported coverage includes channel display names, icons, multiple URLs with
-//! optional `system` attributes, and the major programme metadata fields such as
+//! optional `system` attributes, major programme metadata fields such as
 //! titles, descriptions, categories, credits, ratings, reviews, episode
-//! numbers, images, programme languages, countries, subtitles, and media flags.
+//! numbers, images, programme languages, countries, subtitles, and media flags,
+//! plus strict XMLTV timestamp validation with support for named timezone
+//! suffixes such as `BST`.
 //!
 //! Intentional omissions are documented rather than hidden:
 //! - root `<tv>` metadata attributes are not modeled

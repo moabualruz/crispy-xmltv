@@ -21,7 +21,7 @@ pub fn write(doc: &XmltvDocument) -> Result<String, XmltvError> {
     out.push_str("<tv>\n");
 
     for channel in &doc.channels {
-        write_channel(&mut out, channel);
+        write_channel(&mut out, channel)?;
     }
 
     for programme in &doc.programmes {
@@ -32,7 +32,9 @@ pub fn write(doc: &XmltvDocument) -> Result<String, XmltvError> {
     Ok(out)
 }
 
-fn write_channel(out: &mut String, ch: &EpgChannel) {
+fn write_channel(out: &mut String, ch: &EpgChannel) -> Result<(), XmltvError> {
+    validate_channel(ch)?;
+
     out.push_str("  <channel id=\"");
     write_escaped(out, &ch.id);
     out.push_str("\">\n");
@@ -58,6 +60,7 @@ fn write_channel(out: &mut String, ch: &EpgChannel) {
     }
 
     out.push_str("  </channel>\n");
+    Ok(())
 }
 
 fn write_programme(out: &mut String, prog: &EpgProgramme) -> Result<(), XmltvError> {
@@ -221,7 +224,7 @@ fn write_programme(out: &mut String, prog: &EpgProgramme) -> Result<(), XmltvErr
 }
 
 fn validate_programme(prog: &EpgProgramme) -> Result<(), XmltvError> {
-    if prog.channel.is_empty() {
+    if is_blank(&prog.channel) {
         return Err(XmltvError::Validation(
             "programme channel is required for XMLTV serialization".into(),
         ));
@@ -250,11 +253,41 @@ fn validate_programme(prog: &EpgProgramme) -> Result<(), XmltvError> {
     }
 
     for review in &prog.review {
-        if review.review_type.is_none() {
-            return Err(XmltvError::Validation(
-                "review type is required for XMLTV serialization".into(),
-            ));
-        }
+        validate_review(review)?;
+    }
+
+    Ok(())
+}
+
+fn validate_channel(ch: &EpgChannel) -> Result<(), XmltvError> {
+    if is_blank(&ch.id) {
+        return Err(XmltvError::Validation(
+            "channel id is required for XMLTV serialization".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_review(review: &EpgReview) -> Result<(), XmltvError> {
+    let review_type = review
+        .review_type
+        .as_deref()
+        .filter(|value| !is_blank(value))
+        .ok_or_else(|| {
+            XmltvError::Validation("review type is required for XMLTV serialization".into())
+        })?;
+
+    if !matches!(review_type, "text" | "url") {
+        return Err(XmltvError::Validation(format!(
+            "review type `{review_type}` is invalid for XMLTV serialization"
+        )));
+    }
+
+    if is_blank(&review.value) {
+        return Err(XmltvError::Validation(
+            "review value is required for XMLTV serialization".into(),
+        ));
     }
 
     Ok(())
@@ -535,9 +568,11 @@ fn write_subtitles(out: &mut String, subtitles: &EpgSubtitles) {
 }
 
 fn write_review(out: &mut String, review: &EpgReview) -> Result<(), XmltvError> {
-    let review_type = review.review_type.as_deref().ok_or_else(|| {
-        XmltvError::Validation("review type is required for XMLTV serialization".into())
-    })?;
+    validate_review(review)?;
+    let review_type = review
+        .review_type
+        .as_deref()
+        .expect("validated review type is present");
 
     out.push_str("    <review type=\"");
     write_escaped(out, review_type);
@@ -575,6 +610,10 @@ fn write_escaped(out: &mut String, s: &str) {
             _ => out.push(c),
         }
     }
+}
+
+fn is_blank(s: &str) -> bool {
+    s.trim().is_empty()
 }
 
 #[cfg(test)]
@@ -979,6 +1018,62 @@ mod tests {
             }],
         };
         let err = write(&missing_title).unwrap_err();
+        assert!(matches!(err, XmltvError::Validation(_)));
+
+        let blank_channel_id = XmltvDocument {
+            channels: vec![EpgChannel {
+                id: "   ".into(),
+                ..Default::default()
+            }],
+            programmes: vec![],
+        };
+        let err = write(&blank_channel_id).unwrap_err();
+        assert!(matches!(err, XmltvError::Validation(_)));
+
+        let blank_programme_channel = XmltvDocument {
+            channels: vec![],
+            programmes: vec![EpgProgramme {
+                channel: "   ".into(),
+                start: Some(0),
+                title: smallvec![EpgStringWithLang::new("Show")],
+                ..Default::default()
+            }],
+        };
+        let err = write(&blank_programme_channel).unwrap_err();
+        assert!(matches!(err, XmltvError::Validation(_)));
+
+        let invalid_review_type = XmltvDocument {
+            channels: vec![],
+            programmes: vec![EpgProgramme {
+                channel: "ch1".into(),
+                start: Some(0),
+                title: smallvec![EpgStringWithLang::new("Show")],
+                review: smallvec![EpgReview {
+                    value: "Great show".into(),
+                    review_type: Some("html".into()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        let err = write(&invalid_review_type).unwrap_err();
+        assert!(matches!(err, XmltvError::Validation(_)));
+
+        let blank_review_value = XmltvDocument {
+            channels: vec![],
+            programmes: vec![EpgProgramme {
+                channel: "ch1".into(),
+                start: Some(0),
+                title: smallvec![EpgStringWithLang::new("Show")],
+                review: smallvec![EpgReview {
+                    value: "   ".into(),
+                    review_type: Some("text".into()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        let err = write(&blank_review_value).unwrap_err();
         assert!(matches!(err, XmltvError::Validation(_)));
     }
 

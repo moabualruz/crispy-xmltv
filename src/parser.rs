@@ -1185,6 +1185,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_programme_accepts_named_timezone_suffixes() {
+        let xml = r#"<tv>
+  <programme start="200007281733 BST" channel="ch1">
+    <title>Show</title>
+  </programme>
+</tv>"#;
+
+        let doc = parse(xml).unwrap();
+        let expected = try_parse_xmltv_timestamp("200007281733 +0100").unwrap();
+        assert_eq!(doc.programmes[0].start, Some(expected));
+    }
+
+    #[test]
     fn parse_programme_subtitles_and_previous_showing() {
         let xml = r#"<tv>
   <programme start="20250115120000 +0000" channel="ch1">

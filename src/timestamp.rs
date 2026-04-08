@@ -2,7 +2,8 @@
 //!
 //! This crate accepts the documented XMLTV date precisions based on an
 //! initial substring of `YYYYMMDDhhmmss`, which means exactly 4, 6, 8, 10,
-//! 12, or 14 digits, plus an optional `Z` or `±HHMM` suffix.
+//! 12, or 14 digits, plus an optional `Z`, `±HHMM`, or supported named
+//! timezone suffix such as `BST`.
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeDelta};
 
@@ -20,7 +21,8 @@ pub fn parse_xmltv_timestamp(s: &str) -> Option<i64> {
 ///
 /// Accepted numeric precisions are `YYYY`, `YYYYMM`, `YYYYMMDD`,
 /// `YYYYMMDDhh`, `YYYYMMDDhhmm`, and `YYYYMMDDhhmmss`. The timezone suffix is
-/// optional; when present it must be `Z` or `±HHMM`.
+/// optional; when present it must be `Z`, `±HHMM`, or a supported named
+/// timezone abbreviation such as `BST`.
 pub fn try_parse_xmltv_timestamp(s: &str) -> Result<i64, XmltvError> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
@@ -84,10 +86,14 @@ fn split_timestamp_parts(s: &str) -> Result<(&str, TimeDelta), XmltvError> {
     Ok((numeric, delta))
 }
 
-/// Parse timezone offset like `+0530`, `-0800`, or `Z`.
+/// Parse timezone offset like `+0530`, `-0800`, `Z`, or `BST`.
 fn parse_tz_offset(s: &str) -> Result<TimeDelta, XmltvError> {
     if s.eq_ignore_ascii_case("z") {
         return Ok(TimeDelta::zero());
+    }
+
+    if let Some(minutes) = parse_named_tz_offset_minutes(s) {
+        return Ok(TimeDelta::minutes(minutes));
     }
 
     let bytes = s.as_bytes();
@@ -96,7 +102,7 @@ fn parse_tz_offset(s: &str) -> Result<TimeDelta, XmltvError> {
         || !bytes[1..].iter().all(u8::is_ascii_digit)
     {
         return Err(XmltvError::Timestamp(format!(
-            "timezone suffix `{s}` must be `Z` or `±HHMM`"
+            "timezone suffix `{s}` must be `Z`, `±HHMM`, or a supported named timezone abbreviation"
         )));
     }
 
@@ -119,6 +125,42 @@ fn parse_tz_offset(s: &str) -> Result<TimeDelta, XmltvError> {
 
     let sign: i64 = if bytes[0] == b'-' { -1 } else { 1 };
     Ok(TimeDelta::minutes(sign * (hours * 60 + minutes)))
+}
+
+fn parse_named_tz_offset_minutes(s: &str) -> Option<i64> {
+    // XMLTV documents may use short named timezone abbreviations such as
+    // `BST`; keep the mapping explicit so parsing stays deterministic.
+    let upper = s.trim().to_ascii_uppercase();
+    let minutes = match upper.as_str() {
+        "UTC" | "GMT" | "WET" => 0,
+        "BST" | "CET" | "WEST" => 60,
+        "CEST" | "EET" => 120,
+        "EEST" => 180,
+        "AST" => -240,
+        "ADT" => -180,
+        "EST" => -300,
+        "EDT" => -240,
+        "CST" => -360,
+        "CDT" => -300,
+        "MST" => -420,
+        "MDT" => -360,
+        "PST" => -480,
+        "PDT" => -420,
+        "AKST" => -540,
+        "AKDT" => -480,
+        "HST" => -600,
+        "JST" | "KST" => 540,
+        "AEST" => 600,
+        "AEDT" => 660,
+        "ACST" => 570,
+        "ACDT" => 630,
+        "AWST" => 480,
+        "NZST" => 720,
+        "NZDT" => 780,
+        _ => return None,
+    };
+
+    Some(minutes)
 }
 
 /// Parse the numeric portion of an XMLTV timestamp into a `NaiveDateTime`.
@@ -261,6 +303,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_named_timezone_bst() {
+        let ts = try_parse_xmltv_timestamp("200007281733 BST").unwrap();
+        let expected = try_parse_xmltv_timestamp("200007281733 +0100").unwrap();
+        assert_eq!(ts, expected);
+    }
+
+    #[test]
+    fn parse_named_timezone_case_insensitively() {
+        let ts = try_parse_xmltv_timestamp("20250115120000 cest").unwrap();
+        let expected = try_parse_xmltv_timestamp("20250115120000 +0200").unwrap();
+        assert_eq!(ts, expected);
+    }
+
+    #[test]
     fn parse_empty_returns_none() {
         assert!(parse_xmltv_timestamp("").is_none());
         assert!(parse_xmltv_timestamp("  ").is_none());
@@ -289,7 +345,7 @@ mod tests {
     fn parse_rejects_malformed_suffixes() {
         assert!(parse_xmltv_timestamp("20250115120000 +00").is_none());
         assert!(parse_xmltv_timestamp("20250115120000 +0A00").is_none());
-        assert!(parse_xmltv_timestamp("20250115120000 BST").is_none());
+        assert!(parse_xmltv_timestamp("20250115120000 XYZ").is_none());
         assert!(parse_xmltv_timestamp("20250115120000 +2460").is_none());
     }
 
