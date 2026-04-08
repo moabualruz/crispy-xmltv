@@ -1198,6 +1198,29 @@ mod tests {
     }
 
     #[test]
+    fn parse_programme_accepts_upstream_date_manip_zone_aliases() {
+        let xml = r#"<tv>
+  <programme start="20250115120000 GMT+10" channel="ch1">
+    <title>Morning Show</title>
+  </programme>
+  <programme start="20250115120000 HKT" channel="ch2">
+    <title>Evening Show</title>
+  </programme>
+</tv>"#;
+
+        let doc = parse(xml).unwrap();
+        assert_eq!(doc.programmes.len(), 2);
+        assert_eq!(
+            doc.programmes[0].start,
+            Some(try_parse_xmltv_timestamp("20250115120000 +1000").unwrap())
+        );
+        assert_eq!(
+            doc.programmes[1].start,
+            Some(try_parse_xmltv_timestamp("20250115120000 +0800").unwrap())
+        );
+    }
+
+    #[test]
     fn parse_programme_subtitles_and_previous_showing() {
         let xml = r#"<tv>
   <programme start="20250115120000 +0000" channel="ch1">

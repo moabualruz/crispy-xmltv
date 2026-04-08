@@ -2,8 +2,9 @@
 //!
 //! This crate accepts the documented XMLTV date precisions based on an
 //! initial substring of `YYYYMMDDhhmmss`, which means exactly 4, 6, 8, 10,
-//! 12, or 14 digits, plus an optional `Z`, `±HHMM`, or supported named
-//! timezone suffix such as `BST`.
+//! 12, or 14 digits, plus an optional `Z`, `±HHMM`, or named timezone suffixes
+//! from XMLTV's upstream `Date::Manip` short-abbreviation table such as `BST`,
+//! `HKT`, or `GMT+10`.
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeDelta};
 
@@ -21,8 +22,9 @@ pub fn parse_xmltv_timestamp(s: &str) -> Option<i64> {
 ///
 /// Accepted numeric precisions are `YYYY`, `YYYYMM`, `YYYYMMDD`,
 /// `YYYYMMDDhh`, `YYYYMMDDhhmm`, and `YYYYMMDDhhmmss`. The timezone suffix is
-/// optional; when present it must be `Z`, `±HHMM`, or a supported named
-/// timezone abbreviation such as `BST`.
+/// optional; when present it must be `Z`, `±HHMM`, or a named timezone from
+/// XMLTV's upstream `Date::Manip` short-abbreviation table, such as `BST`,
+/// `HKT`, or `GMT+10`.
 pub fn try_parse_xmltv_timestamp(s: &str) -> Result<i64, XmltvError> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
@@ -102,7 +104,7 @@ fn parse_tz_offset(s: &str) -> Result<TimeDelta, XmltvError> {
         || !bytes[1..].iter().all(u8::is_ascii_digit)
     {
         return Err(XmltvError::Timestamp(format!(
-            "timezone suffix `{s}` must be `Z`, `±HHMM`, or a supported named timezone abbreviation"
+            "timezone suffix `{s}` must be `Z`, `±HHMM`, or a supported XMLTV named timezone abbreviation"
         )));
     }
 
@@ -127,40 +129,190 @@ fn parse_tz_offset(s: &str) -> Result<TimeDelta, XmltvError> {
     Ok(TimeDelta::minutes(sign * (hours * 60 + minutes)))
 }
 
-fn parse_named_tz_offset_minutes(s: &str) -> Option<i64> {
-    // XMLTV documents may use short named timezone abbreviations such as
-    // `BST`; keep the mapping explicit so parsing stays deterministic.
-    let upper = s.trim().to_ascii_uppercase();
-    let minutes = match upper.as_str() {
-        "UTC" | "GMT" | "WET" => 0,
-        "BST" | "CET" | "WEST" => 60,
-        "CEST" | "EET" => 120,
-        "EEST" => 180,
-        "AST" => -240,
-        "ADT" => -180,
-        "EST" => -300,
-        "EDT" => -240,
-        "CST" => -360,
-        "CDT" => -300,
-        "MST" => -420,
-        "MDT" => -360,
-        "PST" => -480,
-        "PDT" => -420,
-        "AKST" => -540,
-        "AKDT" => -480,
-        "HST" => -600,
-        "JST" | "KST" => 540,
-        "AEST" => 600,
-        "AEDT" => 660,
-        "ACST" => 570,
-        "ACDT" => 630,
-        "AWST" => 480,
-        "NZST" => 720,
-        "NZDT" => 780,
-        _ => return None,
-    };
+// XMLTV delegates named-zone parsing to Date::Manip. Keep a deterministic
+// compatibility subset by mirroring Date::Manip's short-abbreviation table
+// instead of guessing arbitrary names or depending on host timezone data.
+const DATE_MANIP_NAMED_TZ_OFFSETS: &[(&str, i16)] = &[
+    ("A", -60),
+    ("ACDT", 630),
+    ("ACST", 570),
+    ("ADDT", -120),
+    ("ADT", -180),
+    ("AEDT", 660),
+    ("AEST", 600),
+    ("AHDT", -540),
+    ("AHST", -600),
+    ("AKDT", -480),
+    ("AKST", -540),
+    ("APT", -540),
+    ("AST", -240),
+    ("AT", -120),
+    ("AWDT", 540),
+    ("AWST", 480),
+    ("AWT", -180),
+    ("B", -120),
+    ("BDST", 120),
+    ("BDT", -600),
+    ("BST", 60),
+    ("BT", 180),
+    ("C", -180),
+    ("CADT", 630),
+    ("CAST", 180),
+    ("CAT", 120),
+    ("CDT", -300),
+    ("CEMT", 180),
+    ("CEST", 120),
+    ("CET", 60),
+    ("CHST", 600),
+    ("CLDT", -180),
+    ("CMT", 115),
+    ("CPT", -300),
+    ("CST", -360),
+    ("CWT", -300),
+    ("D", -240),
+    ("E", -300),
+    ("EADT", 660),
+    ("EAT", 180),
+    ("EDT", -240),
+    ("EEST", 180),
+    ("EET", 120),
+    ("EETDST", 180),
+    ("EETEDT", 180),
+    ("EPT", -240),
+    ("EST", -300),
+    ("EWT", -240),
+    ("F", -360),
+    ("FST", 120),
+    ("FWT", 60),
+    ("G", -420),
+    ("GB", 60),
+    ("GDT", 660),
+    ("GMT", 0),
+    ("GMT+1", 60),
+    ("GMT+10", 600),
+    ("GMT+11", 660),
+    ("GMT+12", 720),
+    ("GMT+2", 120),
+    ("GMT+3", 180),
+    ("GMT+4", 240),
+    ("GMT+5", 300),
+    ("GMT+6", 360),
+    ("GMT+7", 420),
+    ("GMT+8", 480),
+    ("GMT+9", 540),
+    ("GMT-1", -60),
+    ("GMT-10", -600),
+    ("GMT-11", -660),
+    ("GMT-12", -720),
+    ("GMT-13", -780),
+    ("GMT-14", -840),
+    ("GMT-2", -120),
+    ("GMT-3", -180),
+    ("GMT-4", -240),
+    ("GMT-5", -300),
+    ("GMT-6", -360),
+    ("GMT-7", -420),
+    ("GMT-8", -480),
+    ("GMT-9", -540),
+    ("GST", 600),
+    ("H", -480),
+    ("HDT", -540),
+    ("HKST", 540),
+    ("HKT", 480),
+    ("HKWT", 510),
+    ("HPT", -570),
+    ("HST", -600),
+    ("HWT", -570),
+    ("I", -540),
+    ("IDDT", 240),
+    ("IDLE", 720),
+    ("IDLW", -720),
+    ("IDT", 180),
+    ("IST", 330),
+    ("IT", 210),
+    ("JDT", 600),
+    ("JST", 540),
+    ("K", -600),
+    ("KDT", 600),
+    ("KST", 540),
+    ("L", -660),
+    ("M", -720),
+    ("MDT", -360),
+    ("MESZ", 120),
+    ("METDST", 120),
+    ("MEWT", 60),
+    ("MEZ", 60),
+    ("MMT", 294),
+    ("MPT", -360),
+    ("MSD", 240),
+    ("MSK", 180),
+    ("MST", -420),
+    ("MWT", -360),
+    ("N", 60),
+    ("NDDT", -90),
+    ("NDT", -150),
+    ("NPT", -600),
+    ("NST", -210),
+    ("NT", -660),
+    ("NWT", -600),
+    ("NZDT", 780),
+    ("NZMT", 690),
+    ("NZST", 720),
+    ("NZT", 720),
+    ("O", 120),
+    ("P", 180),
+    ("PDT", -420),
+    ("PKST", 360),
+    ("PKT", 300),
+    ("PPMT", -289),
+    ("PPT", -420),
+    ("PST", -480),
+    ("PWT", -420),
+    ("Q", 240),
+    ("QMT", -314),
+    ("R", 300),
+    ("ROK", 540),
+    ("S", 360),
+    ("SAST", 120),
+    ("SAT", -240),
+    ("SDMT", -280),
+    ("SMT", 136),
+    ("SST", -660),
+    ("SWT", 60),
+    ("T", 420),
+    ("TMT", 99),
+    ("U", 480),
+    ("UT", 0),
+    ("UTC", 0),
+    ("V", 540),
+    ("W", 600),
+    ("WAST", 120),
+    ("WAT", 60),
+    ("WEMT", 120),
+    ("WEST", 60),
+    ("WET", 0),
+    ("WIB", 420),
+    ("WIT", 540),
+    ("WITA", 480),
+    ("WMT", 84),
+    ("X", 660),
+    ("Y", 720),
+    ("YDDT", -420),
+    ("YDT", -480),
+    ("YPT", -480),
+    ("YST", -540),
+    ("YWT", -480),
+    ("Z", 0),
+    ("ZP4", 240),
+    ("ZP5", 300),
+    ("ZP6", 360),
+];
 
-    Some(minutes)
+fn parse_named_tz_offset_minutes(s: &str) -> Option<i64> {
+    let upper = s.trim().to_ascii_uppercase();
+    DATE_MANIP_NAMED_TZ_OFFSETS
+        .iter()
+        .find_map(|(name, minutes)| (*name == upper).then_some(i64::from(*minutes)))
 }
 
 /// Parse the numeric portion of an XMLTV timestamp into a `NaiveDateTime`.
@@ -314,6 +466,40 @@ mod tests {
         let ts = try_parse_xmltv_timestamp("20250115120000 cest").unwrap();
         let expected = try_parse_xmltv_timestamp("20250115120000 +0200").unwrap();
         assert_eq!(ts, expected);
+    }
+
+    fn assert_named_zone_matches_offset(zone: &str, minutes: i64) {
+        let ts = try_parse_xmltv_timestamp(&format!("20250115120000 {zone}")).unwrap();
+        let expected =
+            try_parse_xmltv_timestamp(&format!("20250115120000 {}", format_offset(minutes)))
+                .unwrap();
+        assert_eq!(
+            ts, expected,
+            "zone `{zone}` should map to {minutes} minutes"
+        );
+    }
+
+    fn format_offset(minutes: i64) -> String {
+        let sign = if minutes < 0 { '-' } else { '+' };
+        let abs = minutes.abs();
+        format!("{sign}{:02}{:02}", abs / 60, abs % 60)
+    }
+
+    #[test]
+    fn parse_named_timezones_from_upstream_date_manip_table() {
+        for (zone, minutes) in [
+            ("A", -60),
+            ("N", 60),
+            ("HKT", 480),
+            ("MESZ", 120),
+            ("MMT", 294),
+            ("NZDT", 780),
+            ("ROK", 540),
+            ("GMT+10", 600),
+            ("GMT-14", -840),
+        ] {
+            assert_named_zone_matches_offset(zone, minutes);
+        }
     }
 
     #[test]
