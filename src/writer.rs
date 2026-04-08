@@ -357,10 +357,12 @@ fn write_credit_person(out: &mut String, tag: &str, person: &EpgPerson) -> bool 
     }
     body.push('>');
 
-    let has_children = person
-        .content
-        .iter()
-        .any(|content| matches!(content, EpgPersonContent::Image(_) | EpgPersonContent::Url(_)));
+    let has_children = person.content.iter().any(|content| {
+        matches!(
+            content,
+            EpgPersonContent::Image(_) | EpgPersonContent::Url(_)
+        )
+    });
 
     if has_children {
         body.push('\n');
@@ -1036,13 +1038,13 @@ mod tests {
                 system: Some("imdb".into()),
                 icons: smallvec![],
             }],
-                review: smallvec![EpgReview {
-                    value: "Great".into(),
-                    review_type: EpgReviewType::Text,
-                    source: None,
-                    reviewer: None,
-                    lang: None,
-                }],
+            review: smallvec![EpgReview {
+                value: "Great".into(),
+                review_type: EpgReviewType::Text,
+                source: None,
+                reviewer: None,
+                lang: None,
+            }],
             image: smallvec![crispy_iptv_types::epg::EpgImage {
                 url: "https://example.com/poster.jpg".into(),
                 image_type: Some("poster".into()),

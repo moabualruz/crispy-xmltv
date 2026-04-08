@@ -36,7 +36,10 @@ fn rich_fixture_roundtrips_supported_xmltv_fields() {
     assert_eq!(programme.episode_num.len(), 2);
     assert_eq!(programme.episode_num[0].system.as_deref(), Some("xmltv_ns"));
     assert_eq!(programme.rating[0].system.as_deref(), Some("MPAA"));
-    assert_eq!(programme.review[0].review_type, crispy_iptv_types::epg::EpgReviewType::Text);
+    assert_eq!(
+        programme.review[0].review_type,
+        crispy_iptv_types::epg::EpgReviewType::Text
+    );
     assert_eq!(
         programme
             .previously_shown
