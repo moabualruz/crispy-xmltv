@@ -21,7 +21,9 @@ pub struct XmltvDocument {
 pub use crispy_iptv_types::epg::{
     EpgAudio as XmltvAudio, EpgChannel as XmltvChannel, EpgCredits as XmltvCredits,
     EpgEpisodeNumber as XmltvEpisodeNumber, EpgIcon as XmltvIcon, EpgImage as XmltvImage,
-    EpgPerson as XmltvPerson, EpgProgramme as XmltvProgramme, EpgRating as XmltvRating,
-    EpgReview as XmltvReview, EpgStringWithLang as XmltvStringWithLang, EpgUrl as XmltvUrl,
+    EpgLength as XmltvLength, EpgLengthUnit as XmltvLengthUnit, EpgPerson as XmltvPerson,
+    EpgPreviouslyShown as XmltvPreviouslyShown, EpgProgramme as XmltvProgramme,
+    EpgRating as XmltvRating, EpgReview as XmltvReview, EpgStringWithLang as XmltvStringWithLang,
+    EpgSubtitleType as XmltvSubtitleType, EpgSubtitles as XmltvSubtitles, EpgUrl as XmltvUrl,
     EpgVideo as XmltvVideo,
 };

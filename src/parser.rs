@@ -7,14 +7,16 @@
 use std::io::BufRead;
 
 use crispy_iptv_types::epg::{
-    EpgAudio, EpgChannel, EpgCredits, EpgEpisodeNumber, EpgIcon, EpgImage, EpgPerson, EpgProgramme,
-    EpgRating, EpgReview, EpgStringWithLang, EpgUrl, EpgVideo,
+    EpgAudio, EpgChannel, EpgCredits, EpgEpisodeNumber, EpgIcon, EpgImage, EpgLength,
+    EpgLengthUnit, EpgPerson, EpgPreviouslyShown, EpgProgramme, EpgRating, EpgReview,
+    EpgStringWithLang, EpgSubtitleType, EpgSubtitles, EpgUrl, EpgVideo,
 };
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
+use smallvec::SmallVec;
 
 use crate::error::XmltvError;
-use crate::timestamp::parse_xmltv_timestamp;
+use crate::timestamp::{try_parse_xmltv_timestamp, validate_xmltv_timestamp};
 use crate::types::XmltvDocument;
 
 /// Parse XMLTV content from a string.
@@ -79,7 +81,7 @@ fn parse_events<R: BufRead>(reader: &mut Reader<R>) -> Result<XmltvDocument, Xml
                         doc.channels.push(channel);
                     }
                     b"programme" => {
-                        let prog = parse_programme_start(e);
+                        let prog = parse_programme_start(e)?;
                         let prog = parse_programme_body(reader, prog)?;
                         doc.programmes.push(prog);
                     }
@@ -159,17 +161,28 @@ fn parse_channel_body<R: BufRead>(reader: &mut Reader<R>) -> Result<EpgChannel, 
 
 // ── Programme parsing ───────────────────────────────────────────
 
-fn parse_programme_start(e: &BytesStart<'_>) -> EpgProgramme {
-    let channel = get_attr(e, b"channel").unwrap_or_default();
-    let start = get_attr(e, b"start").and_then(|s| parse_xmltv_timestamp(&s));
-    let stop = get_attr(e, b"stop").and_then(|s| parse_xmltv_timestamp(&s));
+fn parse_programme_start(e: &BytesStart<'_>) -> Result<EpgProgramme, XmltvError> {
+    let channel = get_required_attr(e, b"channel", "programme")?;
+    let start_raw = get_required_attr(e, b"start", "programme")?;
+    let stop = parse_optional_timestamp_attr(e, b"stop", "programme stop")?;
 
-    EpgProgramme {
+    Ok(EpgProgramme {
         channel,
-        start,
+        start: Some(
+            try_parse_xmltv_timestamp(&start_raw).map_err(|_| {
+                XmltvError::Timestamp(format!(
+                    "programme start `{start_raw}` does not follow the supported XMLTV timestamp grammar"
+                ))
+            })?,
+        ),
         stop,
+        pdc_start: parse_optional_raw_timestamp_attr(e, b"pdc-start", "programme pdc-start")?,
+        vps_start: parse_optional_raw_timestamp_attr(e, b"vps-start", "programme vps-start")?,
+        showview: get_attr(e, b"showview"),
+        videoplus: get_attr(e, b"videoplus"),
+        clumpidx: get_attr(e, b"clumpidx"),
         ..Default::default()
-    }
+    })
 }
 
 fn parse_programme_body<R: BufRead>(
@@ -197,11 +210,6 @@ fn parse_programme_body<R: BufRead>(
                     let value = read_text_content(reader)?;
                     prog.desc.push(EpgStringWithLang { value, lang });
                 }
-                b"category" => {
-                    let lang = get_attr(e, b"lang");
-                    let value = read_text_content(reader)?;
-                    prog.category.push(EpgStringWithLang { value, lang });
-                }
                 b"credits" => {
                     prog.credits = Some(parse_credits(reader)?);
                 }
@@ -211,9 +219,40 @@ fn parse_programme_body<R: BufRead>(
                         prog.date = Some(text);
                     }
                 }
+                b"category" => {
+                    let lang = get_attr(e, b"lang");
+                    let value = read_text_content(reader)?;
+                    prog.category.push(EpgStringWithLang { value, lang });
+                }
+                b"keyword" => {
+                    let lang = get_attr(e, b"lang");
+                    let value = read_text_content(reader)?;
+                    prog.keyword.push(EpgStringWithLang { value, lang });
+                }
+                b"language" => {
+                    let lang = get_attr(e, b"lang");
+                    let value = read_text_content(reader)?;
+                    prog.language.push(EpgStringWithLang { value, lang });
+                }
+                b"orig-language" => {
+                    let lang = get_attr(e, b"lang");
+                    let value = read_text_content(reader)?;
+                    prog.orig_language = Some(EpgStringWithLang { value, lang });
+                }
                 b"length" => {
-                    let text = read_text_content(reader)?;
-                    prog.length = text.parse::<u32>().ok();
+                    prog.length = Some(parse_length(reader, e)?);
+                }
+                b"url" => {
+                    let system = get_attr(e, b"system");
+                    let value = read_text_content(reader)?;
+                    if !value.is_empty() {
+                        prog.url.push(EpgUrl { value, system });
+                    }
+                }
+                b"country" => {
+                    let lang = get_attr(e, b"lang");
+                    let value = read_text_content(reader)?;
+                    prog.country.push(EpgStringWithLang { value, lang });
                 }
                 b"episode-num" => {
                     let system = get_attr(e, b"system");
@@ -236,43 +275,36 @@ fn parse_programme_body<R: BufRead>(
                 }
                 b"rating" => {
                     let system = get_attr(e, b"system");
-                    let value = parse_rating_value(reader)?;
-                    prog.rating.push(EpgRating { value, system });
+                    prog.rating.push(parse_rating(reader, system)?);
                 }
                 b"star-rating" => {
                     let system = get_attr(e, b"system");
-                    let value = parse_rating_value(reader)?;
-                    prog.star_rating.push(EpgRating { value, system });
+                    prog.star_rating.push(parse_rating(reader, system)?);
                 }
                 b"premiere" => {
                     prog.is_premiere = true;
-                    let _ = read_text_content(reader);
+                    let value = read_text_content(reader)?;
+                    let lang = get_attr(e, b"lang");
+                    if !value.is_empty() || lang.is_some() {
+                        prog.premiere = Some(EpgStringWithLang { value, lang });
+                    }
                 }
                 b"last-chance" => {
                     prog.is_last_chance = true;
-                    let _ = read_text_content(reader);
-                }
-                b"keyword" => {
-                    let lang = get_attr(e, b"lang");
                     let value = read_text_content(reader)?;
-                    prog.keyword.push(EpgStringWithLang { value, lang });
-                }
-                b"language" => {
-                    // XMLTV <language> = "language the programme is in".
-                    // Not mapped to a dedicated field; skip text to avoid
-                    // depth mismatch.
-                    let _ = read_text_content(reader);
-                }
-                b"orig-language" => {
                     let lang = get_attr(e, b"lang");
-                    let value = read_text_content(reader)?;
-                    prog.orig_language = Some(EpgStringWithLang { value, lang });
+                    if !value.is_empty() || lang.is_some() {
+                        prog.last_chance = Some(EpgStringWithLang { value, lang });
+                    }
                 }
                 b"video" => {
                     prog.video = Some(parse_video(reader)?);
                 }
                 b"audio" => {
                     prog.audio.push(parse_audio(reader)?);
+                }
+                b"subtitles" => {
+                    prog.subtitles.push(parse_subtitles(reader, e)?);
                 }
                 b"review" => {
                     let review_type = get_attr(e, b"type");
@@ -301,12 +333,16 @@ fn parse_programme_body<R: BufRead>(
                 }
                 b"previously-shown" => {
                     prog.is_rerun = true;
+                    prog.previously_shown = Some(parse_previously_shown(e)?);
                 }
                 b"premiere" => {
                     prog.is_premiere = true;
                 }
                 b"last-chance" => {
                     prog.is_last_chance = true;
+                }
+                b"subtitles" => {
+                    prog.subtitles.push(parse_empty_subtitles(e)?);
                 }
                 b"review" => {
                     // Empty <review/> — unlikely but handle gracefully.
@@ -333,6 +369,12 @@ fn parse_programme_body<R: BufRead>(
         buf.clear();
     }
 
+    if prog.title.is_empty() {
+        return Err(XmltvError::Validation(
+            "programme is missing the required <title> element".into(),
+        ));
+    }
+
     Ok(prog)
 }
 
@@ -347,51 +389,56 @@ fn parse_credits<R: BufRead>(reader: &mut Reader<R>) -> Result<EpgCredits, Xmltv
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => match e.name().as_ref() {
                 b"director" => {
-                    credits.director.push(read_text_content(reader)?);
+                    credits
+                        .director
+                        .push(parse_credit_person(reader, None, false)?);
                 }
                 b"actor" => {
                     let role = get_attr(e, b"role");
                     let guest = get_attr(e, b"guest")
                         .map(|v| v.eq_ignore_ascii_case("yes"))
                         .unwrap_or(false);
-                    let image = get_attr(e, b"image");
-                    let url = get_attr(e, b"url");
-                    let name = read_text_content(reader)?;
-                    credits.actor.push(EpgPerson {
-                        name,
-                        role,
-                        guest,
-                        image,
-                        url,
-                    });
+                    credits
+                        .actor
+                        .push(parse_credit_person(reader, role, guest)?);
                 }
                 b"writer" => {
-                    credits.writer.push(read_text_content(reader)?);
+                    credits
+                        .writer
+                        .push(parse_credit_person(reader, None, false)?);
+                }
+                b"adapter" => {
+                    credits
+                        .adapter
+                        .push(parse_credit_person(reader, None, false)?);
                 }
                 b"producer" => {
-                    credits.producer.push(read_text_content(reader)?);
+                    credits
+                        .producer
+                        .push(parse_credit_person(reader, None, false)?);
                 }
                 b"composer" => {
-                    credits.composer.push(read_text_content(reader)?);
+                    credits
+                        .composer
+                        .push(parse_credit_person(reader, None, false)?);
+                }
+                b"editor" => {
+                    credits
+                        .editor
+                        .push(parse_credit_person(reader, None, false)?);
                 }
                 b"presenter" => {
-                    credits.presenter.push(read_text_content(reader)?);
+                    credits
+                        .presenter
+                        .push(parse_credit_person(reader, None, false)?);
                 }
                 b"commentator" => {
-                    credits.commentator.push(read_text_content(reader)?);
+                    credits
+                        .commentator
+                        .push(parse_credit_person(reader, None, false)?);
                 }
                 b"guest" => {
-                    let role = get_attr(e, b"role");
-                    let image = get_attr(e, b"image");
-                    let url = get_attr(e, b"url");
-                    let name = read_text_content(reader)?;
-                    credits.guest.push(EpgPerson {
-                        name,
-                        role,
-                        guest: true,
-                        image,
-                        url,
-                    });
+                    credits.guest.push(parse_credit_person(reader, None, true)?);
                 }
                 _ => {
                     depth += 1;
@@ -415,9 +462,14 @@ fn parse_credits<R: BufRead>(reader: &mut Reader<R>) -> Result<EpgCredits, Xmltv
 
 // ── Rating value parsing ────────────────────────────────────────
 
-/// Parse a `<rating>` or `<star-rating>` body, extracting the `<value>` child.
-fn parse_rating_value<R: BufRead>(reader: &mut Reader<R>) -> Result<String, XmltvError> {
+/// Parse a `<rating>` or `<star-rating>` body, extracting the `<value>` child
+/// and any nested `<icon/>` elements.
+fn parse_rating<R: BufRead>(
+    reader: &mut Reader<R>,
+    system: Option<String>,
+) -> Result<EpgRating, XmltvError> {
     let mut value = String::new();
+    let mut icons = SmallVec::new();
     let mut depth: u32 = 1;
     let mut buf = Vec::new();
 
@@ -425,6 +477,9 @@ fn parse_rating_value<R: BufRead>(reader: &mut Reader<R>) -> Result<String, Xmlt
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) if e.name().as_ref() == b"value" => {
                 value = read_text_content(reader)?;
+            }
+            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"icon" => {
+                icons.push(parse_icon_attrs(e));
             }
             Ok(Event::Start(_)) => {
                 depth += 1;
@@ -442,7 +497,11 @@ fn parse_rating_value<R: BufRead>(reader: &mut Reader<R>) -> Result<String, Xmlt
         buf.clear();
     }
 
-    Ok(value)
+    Ok(EpgRating {
+        value,
+        system,
+        icons,
+    })
 }
 
 // ── Video parsing ───────────────────────────────────────────────
@@ -528,6 +587,148 @@ fn parse_audio<R: BufRead>(reader: &mut Reader<R>) -> Result<EpgAudio, XmltvErro
     Ok(audio)
 }
 
+fn parse_credit_person<R: BufRead>(
+    reader: &mut Reader<R>,
+    role: Option<String>,
+    guest: bool,
+) -> Result<EpgPerson, XmltvError> {
+    let mut person = EpgPerson {
+        role,
+        guest,
+        ..Default::default()
+    };
+    let mut depth: u32 = 1;
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Text(ref e)) => {
+                if let Ok(t) = e.unescape() {
+                    person.name.push_str(&t);
+                }
+            }
+            Ok(Event::CData(ref e)) => {
+                if let Ok(t) = std::str::from_utf8(e.as_ref()) {
+                    person.name.push_str(t);
+                }
+            }
+            Ok(Event::Start(ref e)) if depth == 1 && e.name().as_ref() == b"image" => {
+                let image = read_text_content(reader)?;
+                if !image.is_empty() {
+                    person.images.push(image);
+                }
+            }
+            Ok(Event::Start(ref e)) if depth == 1 && e.name().as_ref() == b"url" => {
+                let url = read_text_content(reader)?;
+                if !url.is_empty() {
+                    person.urls.push(url);
+                }
+            }
+            Ok(Event::Start(_)) => {
+                depth += 1;
+            }
+            Ok(Event::End(_)) => {
+                if depth <= 1 {
+                    break;
+                }
+                depth -= 1;
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(XmltvError::Xml(e.to_string())),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(person)
+}
+
+fn parse_length<R: BufRead>(
+    reader: &mut Reader<R>,
+    e: &BytesStart<'_>,
+) -> Result<EpgLength, XmltvError> {
+    let units = parse_length_unit_attr(get_attr(e, b"units").as_deref())?;
+    let value = read_text_content(reader)?;
+    let value = value.parse::<u32>().map_err(|_| {
+        XmltvError::Xml(format!(
+            "length value `{value}` is not a valid unsigned integer"
+        ))
+    })?;
+
+    Ok(EpgLength { value, units })
+}
+
+fn parse_length_unit_attr(units: Option<&str>) -> Result<EpgLengthUnit, XmltvError> {
+    match units.unwrap_or("minutes") {
+        "seconds" => Ok(EpgLengthUnit::Seconds),
+        "minutes" => Ok(EpgLengthUnit::Minutes),
+        "hours" => Ok(EpgLengthUnit::Hours),
+        other => Err(XmltvError::Xml(format!(
+            "length units `{other}` must be one of `seconds`, `minutes`, or `hours`"
+        ))),
+    }
+}
+
+fn parse_subtitles<R: BufRead>(
+    reader: &mut Reader<R>,
+    e: &BytesStart<'_>,
+) -> Result<EpgSubtitles, XmltvError> {
+    let mut subtitles = parse_empty_subtitles(e)?;
+    let mut depth: u32 = 1;
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"language" => {
+                let lang = get_attr(e, b"lang");
+                let value = read_text_content(reader)?;
+                subtitles.language = Some(EpgStringWithLang { value, lang });
+            }
+            Ok(Event::Start(_)) => {
+                depth += 1;
+            }
+            Ok(Event::End(_)) => {
+                if depth <= 1 {
+                    break;
+                }
+                depth -= 1;
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(XmltvError::Xml(e.to_string())),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(subtitles)
+}
+
+fn parse_empty_subtitles(e: &BytesStart<'_>) -> Result<EpgSubtitles, XmltvError> {
+    Ok(EpgSubtitles {
+        subtitle_type: parse_subtitle_type(get_attr(e, b"type").as_deref())?,
+        language: None,
+    })
+}
+
+fn parse_subtitle_type(value: Option<&str>) -> Result<Option<EpgSubtitleType>, XmltvError> {
+    match value {
+        None => Ok(None),
+        Some("teletext") => Ok(Some(EpgSubtitleType::Teletext)),
+        Some("onscreen") => Ok(Some(EpgSubtitleType::Onscreen)),
+        Some("deaf-signed") => Ok(Some(EpgSubtitleType::DeafSigned)),
+        Some(other) => Err(XmltvError::Xml(format!(
+            "subtitle type `{other}` must be `teletext`, `onscreen`, or `deaf-signed`"
+        ))),
+    }
+}
+
+fn parse_previously_shown(e: &BytesStart<'_>) -> Result<EpgPreviouslyShown, XmltvError> {
+    Ok(EpgPreviouslyShown {
+        start: parse_optional_raw_timestamp_attr(e, b"start", "previously-shown start")?,
+        channel: get_attr(e, b"channel"),
+    })
+}
+
 // ── Icon attribute parsing ──────────────────────────────────────
 
 fn parse_icon_attrs(e: &BytesStart<'_>) -> EpgIcon {
@@ -539,6 +740,50 @@ fn parse_icon_attrs(e: &BytesStart<'_>) -> EpgIcon {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
+
+fn get_required_attr(e: &BytesStart<'_>, key: &[u8], context: &str) -> Result<String, XmltvError> {
+    get_attr(e, key)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            XmltvError::Validation(format!(
+                "{context} is missing the required `{}` attribute",
+                String::from_utf8_lossy(key)
+            ))
+        })
+}
+
+fn parse_optional_timestamp_attr(
+    e: &BytesStart<'_>,
+    key: &[u8],
+    context: &str,
+) -> Result<Option<i64>, XmltvError> {
+    get_attr(e, key)
+        .map(|raw| {
+            try_parse_xmltv_timestamp(&raw).map_err(|_| {
+                XmltvError::Timestamp(format!(
+                    "{context} `{raw}` does not follow the supported XMLTV timestamp grammar"
+                ))
+            })
+        })
+        .transpose()
+}
+
+fn parse_optional_raw_timestamp_attr(
+    e: &BytesStart<'_>,
+    key: &[u8],
+    context: &str,
+) -> Result<Option<String>, XmltvError> {
+    get_attr(e, key)
+        .map(|raw| {
+            validate_xmltv_timestamp(&raw).map_err(|_| {
+                XmltvError::Timestamp(format!(
+                    "{context} `{raw}` does not follow the supported XMLTV timestamp grammar"
+                ))
+            })?;
+            Ok(raw)
+        })
+        .transpose()
+}
 
 /// Read text content until the closing tag of the current element.
 ///
@@ -593,6 +838,7 @@ fn get_attr(e: &BytesStart<'_>, key: &[u8]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crispy_iptv_types::epg::{EpgLengthUnit, EpgSubtitleType};
 
     const MINIMAL_XMLTV: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE tv SYSTEM "xmltv.dtd">
@@ -676,8 +922,8 @@ mod tests {
         let credits = doc.programmes[0].credits.as_ref().unwrap();
 
         assert_eq!(credits.director.len(), 2);
-        assert_eq!(credits.director[0], "Steven Spielberg");
-        assert_eq!(credits.director[1], "James Cameron");
+        assert_eq!(credits.director[0].name, "Steven Spielberg");
+        assert_eq!(credits.director[1].name, "James Cameron");
 
         assert_eq!(credits.actor.len(), 2);
         assert_eq!(credits.actor[0].name, "Tom Hanks");
@@ -685,11 +931,11 @@ mod tests {
         assert_eq!(credits.actor[1].name, "Meryl Streep");
         assert!(credits.actor[1].role.is_none());
 
-        assert_eq!(credits.writer[0], "Aaron Sorkin");
-        assert_eq!(credits.producer[0], "Kathleen Kennedy");
-        assert_eq!(credits.composer[0], "John Williams");
-        assert_eq!(credits.presenter[0], "Ryan Seacrest");
-        assert_eq!(credits.commentator[0], "John Madden");
+        assert_eq!(credits.writer[0].name, "Aaron Sorkin");
+        assert_eq!(credits.producer[0].name, "Kathleen Kennedy");
+        assert_eq!(credits.composer[0].name, "John Williams");
+        assert_eq!(credits.presenter[0].name, "Ryan Seacrest");
+        assert_eq!(credits.commentator[0].name, "John Madden");
 
         assert_eq!(credits.guest.len(), 1);
         assert_eq!(credits.guest[0].name, "Oprah Winfrey");
@@ -787,6 +1033,14 @@ mod tests {
         let prog = &doc.programmes[0];
         assert!(prog.is_premiere);
         assert!(prog.is_last_chance);
+        assert_eq!(
+            prog.premiere.as_ref().map(|p| p.value.as_str()),
+            Some("First showing")
+        );
+        assert_eq!(
+            prog.last_chance.as_ref().map(|p| p.value.as_str()),
+            Some("Last chance to watch")
+        );
     }
 
     #[test]
@@ -881,7 +1135,7 @@ mod tests {
     <category lang="en">Drama</category>
     <category lang="en">Thriller</category>
     <date>2025</date>
-    <length>60</length>
+    <length units="hours">2</length>
   </programme>
 </tv>"#;
         let doc = parse(xml).unwrap();
@@ -892,7 +1146,76 @@ mod tests {
         assert_eq!(prog.category[0].value, "Drama");
         assert_eq!(prog.category[1].value, "Thriller");
         assert_eq!(prog.date.as_deref(), Some("2025"));
-        assert_eq!(prog.length, Some(60));
+        assert_eq!(prog.length.as_ref().unwrap().value, 2);
+        assert_eq!(prog.length.as_ref().unwrap().units, EpgLengthUnit::Hours);
+    }
+
+    #[test]
+    fn parse_length_without_units_defaults_to_minutes() {
+        let xml = r#"<tv>
+  <programme start="20250115120000 +0000" channel="ch1">
+    <title>Show</title>
+    <length>60</length>
+  </programme>
+</tv>"#;
+        let doc = parse(xml).unwrap();
+        let length = doc.programmes[0].length.as_ref().unwrap();
+        assert_eq!(length.value, 60);
+        assert_eq!(length.units, EpgLengthUnit::Minutes);
+    }
+
+    #[test]
+    fn parse_rejects_invalid_programme_timestamps() {
+        let bad_start = r#"<tv>
+  <programme start="20250115120000 +0000junk" channel="ch1">
+    <title>Show</title>
+  </programme>
+</tv>"#;
+        assert!(matches!(parse(bad_start), Err(XmltvError::Timestamp(_))));
+
+        let missing_start = r#"<tv>
+  <programme channel="ch1">
+    <title>Show</title>
+  </programme>
+</tv>"#;
+        assert!(matches!(
+            parse(missing_start),
+            Err(XmltvError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn parse_programme_subtitles_and_previous_showing() {
+        let xml = r#"<tv>
+  <programme start="20250115120000 +0000" channel="ch1">
+    <title>Show</title>
+    <previously-shown start="20240115120000 +0000" channel="archive"/>
+    <subtitles type="onscreen">
+      <language lang="en">English</language>
+    </subtitles>
+  </programme>
+</tv>"#;
+        let doc = parse(xml).unwrap();
+        let prog = &doc.programmes[0];
+        assert!(prog.is_rerun);
+        assert_eq!(
+            prog.previously_shown
+                .as_ref()
+                .and_then(|shown| shown.channel.as_deref()),
+            Some("archive")
+        );
+        assert_eq!(prog.subtitles.len(), 1);
+        assert_eq!(
+            prog.subtitles[0].subtitle_type,
+            Some(EpgSubtitleType::Onscreen)
+        );
+        assert_eq!(
+            prog.subtitles[0]
+                .language
+                .as_ref()
+                .map(|language| language.value.as_str()),
+            Some("English")
+        );
     }
 
     #[test]
@@ -944,17 +1267,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_language_element_does_not_panic() {
-        // XMLTV <language> is the language the programme is in.
-        // Not currently mapped to a dedicated field but must not break parsing.
+    fn parse_language_element() {
         let xml = r#"<tv>
   <programme start="20250115120000 +0000" stop="20250115130000 +0000" channel="ch1">
     <title>Show</title>
-    <language>English</language>
+    <language lang="en">English</language>
   </programme>
 </tv>"#;
         let doc = parse(xml).unwrap();
-        assert_eq!(doc.programmes[0].title[0].value, "Show");
+        assert_eq!(doc.programmes[0].language[0].value, "English");
+        assert_eq!(doc.programmes[0].language[0].lang.as_deref(), Some("en"));
     }
 
     #[test]

@@ -7,12 +7,13 @@
 //! Supported coverage includes channel display names, icons, multiple URLs with
 //! optional `system` attributes, and the major programme metadata fields such as
 //! titles, descriptions, categories, credits, ratings, reviews, episode
-//! numbers, images, and media flags.
+//! numbers, images, programme languages, countries, subtitles, and media flags.
 //!
 //! Intentional omissions are documented rather than hidden:
 //! - root `<tv>` metadata attributes are not modeled
 //! - exact byte-for-byte source fidelity is not guaranteed
-//! - `<language>` text is currently skipped rather than mapped to a dedicated field
+//! - serialization validates required programme fields instead of silently
+//!   emitting malformed XMLTV
 //!
 //! # Usage
 //!
@@ -33,7 +34,7 @@
 //! assert_eq!(doc.channels.len(), 1);
 //! assert_eq!(doc.programmes.len(), 1);
 //!
-//! let output = write(&doc);
+//! let output = write(&doc).unwrap();
 //! assert!(output.contains("<channel id=\"ch1\">"));
 //! ```
 

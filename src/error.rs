@@ -7,6 +7,10 @@ pub enum XmltvError {
     #[error("XML error: {0}")]
     Xml(String),
 
+    /// Semantic validation error for required XMLTV data.
+    #[error("validation error: {0}")]
+    Validation(String),
+
     /// Invalid or unparseable XMLTV timestamp.
     #[error("invalid timestamp: {0}")]
     Timestamp(String),

@@ -8,15 +8,31 @@
     <url system="official">https://example.com/watch</url>
     <url system="mirror">https://mirror.example.com/watch</url>
   </channel>
-  <programme start="20250115120000 +0000" stop="20250115130000 +0000" channel="ch.rich">
+  <programme
+    start="20250115120000 +0000"
+    stop="20250115130000 +0000"
+    pdc-start="20250115115900 +0000"
+    vps-start="20250115115900 +0000"
+    showview="123456"
+    videoplus="654321"
+    channel="ch.rich"
+    clumpidx="0/1">
     <title lang="en">Feature Show</title>
     <sub-title lang="en">Episode Subtitle</sub-title>
     <desc lang="en">Long-form description.</desc>
     <category lang="en">Drama</category>
     <keyword lang="en">Featured</keyword>
+    <language lang="en">English</language>
     <orig-language lang="fr">French</orig-language>
+    <length units="minutes">60</length>
+    <url system="official">https://example.com/programme</url>
+    <country>GB</country>
     <episode-num system="xmltv_ns">0.1.0/1</episode-num>
     <episode-num system="onscreen">S01E02</episode-num>
+    <previously-shown start="20240115120000 +0000" channel="archive"/>
+    <subtitles type="onscreen">
+      <language lang="en">English</language>
+    </subtitles>
     <image type="poster" size="3" orient="P" system="tmdb">https://example.com/poster.jpg</image>
     <rating system="MPAA">
       <value>PG-13</value>

@@ -65,8 +65,8 @@ pub fn parse_xmltv_ns(value: &str) -> Option<EpisodeInfo> {
     let season = parse_int_and_increment(season_str);
     let episode = parse_int_and_increment(episode_str);
 
-    // Parse part number: "2/3" → part=3 (0-based 2 + 1), part_count=3
-    // A bare number without "/" is treated as invalid per C++ logic
+    // Parse part number: "2/3" → part=3 (0-based 2 + 1), part_count=3.
+    // Current upstream logic also preserves a bare number like "2" as part=3.
     // (sets EPG_TAG_INVALID_SERIES_EPISODE).
     let (part, part_count) = if !part_str.is_empty() {
         parse_part_number(part_str)
@@ -159,9 +159,8 @@ fn parse_int_and_increment(s: &str) -> Option<u32> {
 
 /// Parse part number string like "2/3" or bare "2".
 ///
-/// C++ logic:
-/// - If "numerator/denominator" parsed (2 elements), increment numerator by 1.
-/// - If only numerator parsed (1 element), treat as invalid (return None).
+/// Current `pvr.iptvsimple` logic preserves bare part numbers by incrementing
+/// them to the 1-based display form and leaving `part_count` unset.
 fn parse_part_number(s: &str) -> (Option<u32>, Option<u32>) {
     let trimmed = s.trim();
     if trimmed.is_empty() {
@@ -180,9 +179,12 @@ fn parse_part_number(s: &str) -> (Option<u32>, Option<u32>) {
         }
     }
 
-    // Bare number without denominator — C++ sets EPG_TAG_INVALID_SERIES_EPISODE,
-    // which we represent as None.
-    (None, None)
+    trimmed
+        .parse::<i32>()
+        .ok()
+        .filter(|num| *num >= 0)
+        .and_then(|num| u32::try_from(num + 1).ok())
+        .map_or((None, None), |part| (Some(part), None))
 }
 
 #[cfg(test)]
@@ -253,12 +255,12 @@ mod tests {
     }
 
     #[test]
-    fn xmltv_ns_part_without_denominator_is_none() {
-        // "0.4.2" — bare part number without /total → part is None per C++ logic
+    fn xmltv_ns_part_without_denominator_is_preserved() {
+        // "0.4.2" — bare part number without /total is preserved by upstream.
         let info = parse_xmltv_ns("0.4.2").unwrap();
         assert_eq!(info.season, Some(1));
         assert_eq!(info.episode, Some(5));
-        assert_eq!(info.part, None);
+        assert_eq!(info.part, Some(3));
         assert_eq!(info.part_count, None);
     }
 

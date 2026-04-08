@@ -11,7 +11,7 @@ Streaming XMLTV parser and writer for large EPG inputs.
 - `parse(&str)`
 - `parse_reader(...)`
 - `parse_compressed(...)`
-- `write(&XmltvDocument)`
+- `write(&XmltvDocument) -> Result<String, XmltvError>`
 - automatic decompression helpers for common compressed XMLTV inputs
 - episode-number parsing helpers
 
@@ -41,7 +41,7 @@ let doc = parse(xml).unwrap();
 assert_eq!(doc.channels.len(), 1);
 assert_eq!(doc.programmes.len(), 1);
 
-let output = write(&doc);
+let output = write(&doc).unwrap();
 assert!(output.contains("programme"));
 ```
 
@@ -57,15 +57,20 @@ The crate is aimed at a practical, explicitly documented XMLTV subset.
 
 Supported and round-trippable fields include:
 - channel `display-name`, `icon`, and multiple `url` elements with optional `system`
-- programme titles, subtitles, descriptions, categories, dates, lengths, credits
+- programme titles, subtitles, descriptions, categories, dates, explicit lengths, credits
+- programme `language`, `orig-language`, `url`, `country`, `previously-shown`, and `subtitles`
 - episode numbers with `system`
 - `image` metadata including `type`, `size`, `orient`, and `system`
 - `rating`, `star-rating`, `review`, `video`, `audio`, `keyword`, and boolean flags
 
 Intentional omissions or non-goals:
 - root `<tv>` metadata attributes are not modeled
-- `<language>` text is currently skipped rather than mapped to a dedicated field
 - writing preserves structured meaning, not byte-for-byte source formatting
+
+Writer/parser validation notes:
+- programme parsing rejects malformed required `start` / `channel` attributes and invalid XMLTV timestamps
+- writer serialization is fallible and rejects invalid programmes instead of emitting malformed XMLTV
+- `<length>` values preserve explicit XMLTV units; legacy unit-less lengths are normalized to minutes on parse
 
 ## Typical Uses
 
