@@ -1,7 +1,7 @@
 [package]
 name = "crispy-xmltv"
 description = "Streaming XMLTV/EPG parser for large files"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 license = "CC-BY-NC-SA-4.0"
 repository = "https://github.com/moabualruz/crispy-xmltv"
@@ -13,7 +13,7 @@ categories = ["multimedia", "parser-implementations"]
 rust-version = "1.85"
 
 [dependencies]
-crispy-iptv-types = "0.1.1"
+crispy-iptv-types = "0.2.0"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 quick-xml = "0.37"
