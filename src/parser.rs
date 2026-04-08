@@ -619,7 +619,10 @@ mod tests {
         assert_eq!(ch.display_name[0].value, "Channel One");
         assert_eq!(ch.icon.as_ref().unwrap().src, "https://example.com/ch1.png");
         assert_eq!(ch.icon.as_ref().unwrap().width, Some(100));
-        assert_eq!(ch.url.as_ref().map(|u| u.value.as_str()), Some("https://example.com/ch1"));
+        assert_eq!(
+            ch.url.as_ref().map(|u| u.value.as_str()),
+            Some("https://example.com/ch1")
+        );
 
         let prog = &doc.programmes[0];
         assert_eq!(prog.channel, "ch1");
@@ -1077,7 +1080,10 @@ mod tests {
         assert_eq!(ch.urls[0].value, "https://example.com");
         assert_eq!(ch.urls[1].value, "https://mirror.example.com");
         // Backward compat: first URL in `url`.
-        assert_eq!(ch.url.as_ref().map(|u| u.value.as_str()), Some("https://example.com"));
+        assert_eq!(
+            ch.url.as_ref().map(|u| u.value.as_str()),
+            Some("https://example.com")
+        );
     }
 
     #[test]
