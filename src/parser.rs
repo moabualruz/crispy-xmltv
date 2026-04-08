@@ -8,7 +8,7 @@ use std::io::BufRead;
 
 use crispy_iptv_types::epg::{
     EpgAudio, EpgChannel, EpgCredits, EpgEpisodeNumber, EpgIcon, EpgImage, EpgPerson, EpgProgramme,
-    EpgRating, EpgReview, EpgStringWithLang, EpgVideo,
+    EpgRating, EpgReview, EpgStringWithLang, EpgUrl, EpgVideo,
 };
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
@@ -116,12 +116,16 @@ fn parse_channel_body<R: BufRead>(reader: &mut Reader<R>) -> Result<EpgChannel, 
                     }
                 }
                 b"url" => {
+                    let system = get_attr(e, b"system");
                     let text = read_text_content(reader)?;
                     if !text.is_empty() {
-                        channel.urls.push(text.clone());
-                        // Backward compat: first URL also fills `channel.url`.
+                        let url = EpgUrl {
+                            value: text,
+                            system,
+                        };
+                        channel.urls.push(url.clone());
                         if channel.url.is_none() {
-                            channel.url = Some(text);
+                            channel.url = Some(url);
                         }
                     }
                 }
@@ -220,12 +224,14 @@ fn parse_programme_body<R: BufRead>(
                     let image_type = get_attr(e, b"type");
                     let size = get_attr(e, b"size");
                     let orient = get_attr(e, b"orient");
+                    let system = get_attr(e, b"system");
                     let url = read_text_content(reader)?;
                     prog.image.push(EpgImage {
                         url,
                         image_type,
                         size,
                         orient,
+                        system,
                     });
                 }
                 b"rating" => {
@@ -613,7 +619,7 @@ mod tests {
         assert_eq!(ch.display_name[0].value, "Channel One");
         assert_eq!(ch.icon.as_ref().unwrap().src, "https://example.com/ch1.png");
         assert_eq!(ch.icon.as_ref().unwrap().width, Some(100));
-        assert_eq!(ch.url.as_deref(), Some("https://example.com/ch1"));
+        assert_eq!(ch.url.as_ref().map(|u| u.value.as_str()), Some("https://example.com/ch1"));
 
         let prog = &doc.programmes[0];
         assert_eq!(prog.channel, "ch1");
@@ -1068,10 +1074,10 @@ mod tests {
         let doc = parse(xml).unwrap();
         let ch = &doc.channels[0];
         assert_eq!(ch.urls.len(), 2);
-        assert_eq!(ch.urls[0], "https://example.com");
-        assert_eq!(ch.urls[1], "https://mirror.example.com");
+        assert_eq!(ch.urls[0].value, "https://example.com");
+        assert_eq!(ch.urls[1].value, "https://mirror.example.com");
         // Backward compat: first URL in `url`.
-        assert_eq!(ch.url.as_deref(), Some("https://example.com"));
+        assert_eq!(ch.url.as_ref().map(|u| u.value.as_str()), Some("https://example.com"));
     }
 
     #[test]

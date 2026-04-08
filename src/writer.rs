@@ -1,7 +1,8 @@
 //! XMLTV writer — serializes `XmltvDocument` to valid XMLTV XML.
 
 use crispy_iptv_types::epg::{
-    EpgAudio, EpgChannel, EpgIcon, EpgProgramme, EpgRating, EpgReview, EpgStringWithLang, EpgVideo,
+    EpgAudio, EpgChannel, EpgIcon, EpgProgramme, EpgRating, EpgReview, EpgStringWithLang, EpgUrl,
+    EpgVideo,
 };
 
 use crate::timestamp::format_xmltv_timestamp;
@@ -51,14 +52,10 @@ fn write_channel(out: &mut String, ch: &EpgChannel) {
     // Write urls: prefer `urls` SmallVec; fall back to single `url`.
     if !ch.urls.is_empty() {
         for url in &ch.urls {
-            out.push_str("    <url>");
-            write_escaped(out, url);
-            out.push_str("</url>\n");
+            write_url(out, url);
         }
     } else if let Some(ref url) = ch.url {
-        out.push_str("    <url>");
-        write_escaped(out, url);
-        out.push_str("</url>\n");
+        write_url(out, url);
     }
 
     out.push_str("  </channel>\n");
@@ -213,6 +210,11 @@ fn write_programme(out: &mut String, prog: &EpgProgramme) {
             write_escaped(out, o);
             out.push('"');
         }
+        if let Some(ref system) = img.system {
+            out.push_str(" system=\"");
+            write_escaped(out, system);
+            out.push('"');
+        }
         out.push('>');
         write_escaped(out, &img.url);
         out.push_str("</image>\n");
@@ -276,6 +278,18 @@ fn write_icon(out: &mut String, icon: &EpgIcon) {
         out.push('"');
     }
     out.push_str("/>\n");
+}
+
+fn write_url(out: &mut String, url: &EpgUrl) {
+    out.push_str("    <url");
+    if let Some(ref system) = url.system {
+        out.push_str(" system=\"");
+        write_escaped(out, system);
+        out.push('"');
+    }
+    out.push('>');
+    write_escaped(out, &url.value);
+    out.push_str("</url>\n");
 }
 
 fn write_rating(out: &mut String, tag: &str, rating: &EpgRating) {
@@ -399,7 +413,10 @@ mod tests {
                     width: Some(100),
                     height: Some(50),
                 }),
-                url: Some("https://example.com".into()),
+                url: Some(EpgUrl {
+                    value: "https://example.com".into(),
+                    system: None,
+                }),
                 ..Default::default()
             }],
             programmes: vec![EpgProgramme {
@@ -424,7 +441,7 @@ mod tests {
             "https://example.com/icon.png"
         );
         assert_eq!(
-            parsed.channels[0].url.as_deref(),
+            parsed.channels[0].url.as_ref().map(|u| u.value.as_str()),
             Some("https://example.com")
         );
 
@@ -575,8 +592,14 @@ mod tests {
                     },
                 ],
                 urls: smallvec::smallvec![
-                    "https://example.com".into(),
-                    "https://mirror.example.com".into(),
+                    EpgUrl {
+                        value: "https://example.com".into(),
+                        system: None,
+                    },
+                    EpgUrl {
+                        value: "https://mirror.example.com".into(),
+                        system: None,
+                    },
                 ],
             }],
             programmes: vec![],
