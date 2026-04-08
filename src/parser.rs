@@ -312,13 +312,16 @@ fn parse_programme_body<R: BufRead>(
                     let reviewer = get_attr(e, b"reviewer");
                     let lang = get_attr(e, b"lang");
                     let value = read_text_content(reader)?;
-                    prog.review.push(EpgReview {
-                        value,
-                        review_type,
-                        source,
-                        reviewer,
-                        lang,
-                    });
+                    push_review_if_present(
+                        &mut prog.review,
+                        EpgReview {
+                            value,
+                            review_type,
+                            source,
+                            reviewer,
+                            lang,
+                        },
+                    );
                 }
                 _ => {
                     depth += 1;
@@ -345,14 +348,18 @@ fn parse_programme_body<R: BufRead>(
                     prog.subtitles.push(parse_empty_subtitles(e)?);
                 }
                 b"review" => {
-                    // Empty <review/> — unlikely but handle gracefully.
-                    prog.review.push(EpgReview {
-                        review_type: get_attr(e, b"type"),
-                        source: get_attr(e, b"source"),
-                        reviewer: get_attr(e, b"reviewer"),
-                        lang: get_attr(e, b"lang"),
-                        ..Default::default()
-                    });
+                    // Blank reviews do not round-trip as valid XMLTV, so drop them here
+                    // instead of preserving writer-invalid state.
+                    push_review_if_present(
+                        &mut prog.review,
+                        EpgReview {
+                            review_type: get_attr(e, b"type"),
+                            source: get_attr(e, b"source"),
+                            reviewer: get_attr(e, b"reviewer"),
+                            lang: get_attr(e, b"lang"),
+                            ..Default::default()
+                        },
+                    );
                 }
                 _ => {}
             },
@@ -736,6 +743,12 @@ fn parse_icon_attrs(e: &BytesStart<'_>) -> EpgIcon {
         src: get_attr(e, b"src").unwrap_or_default(),
         width: get_attr(e, b"width").and_then(|v| v.parse().ok()),
         height: get_attr(e, b"height").and_then(|v| v.parse().ok()),
+    }
+}
+
+fn push_review_if_present(reviews: &mut SmallVec<[EpgReview; 1]>, review: EpgReview) {
+    if !review.value.trim().is_empty() {
+        reviews.push(review);
     }
 }
 
@@ -1421,6 +1434,25 @@ mod tests {
         assert_eq!(prog.review[1].value, "https://example.com/review");
         assert_eq!(prog.review[1].review_type.as_deref(), Some("url"));
         assert!(prog.review[1].source.is_none());
+    }
+
+    #[test]
+    fn parse_ignores_blank_review_nodes() {
+        let xml = r#"<tv>
+  <programme start="20250115120000 +0000" stop="20250115130000 +0000" channel="ch1">
+    <title>Show</title>
+    <review type="text"></review>
+    <review type="url">   </review>
+    <review source="NYT" reviewer="Jane Doe"/>
+    <review type="text">Keeps this one</review>
+  </programme>
+</tv>"#;
+        let doc = parse(xml).unwrap();
+        let prog = &doc.programmes[0];
+
+        assert_eq!(prog.review.len(), 1);
+        assert_eq!(prog.review[0].value, "Keeps this one");
+        assert_eq!(prog.review[0].review_type.as_deref(), Some("text"));
     }
 
     #[test]

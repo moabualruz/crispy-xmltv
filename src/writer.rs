@@ -268,6 +268,16 @@ fn validate_channel(ch: &EpgChannel) -> Result<(), XmltvError> {
             "channel id is required for XMLTV serialization".into(),
         ));
     }
+    if ch
+        .display_name
+        .iter()
+        .all(|display_name| is_blank(&display_name.value))
+    {
+        return Err(XmltvError::Validation(
+            "channel display-name must contain at least one non-blank value for XMLTV serialization"
+                .into(),
+        ));
+    }
 
     Ok(())
 }
@@ -1151,6 +1161,30 @@ mod tests {
     }
 
     #[test]
+    fn write_rejects_channels_without_non_blank_display_names() {
+        let missing_display_name = XmltvDocument {
+            channels: vec![EpgChannel {
+                id: "ch1".into(),
+                ..Default::default()
+            }],
+            programmes: vec![],
+        };
+        let err = write(&missing_display_name).unwrap_err();
+        assert!(matches!(err, XmltvError::Validation(_)));
+
+        let blank_display_name = XmltvDocument {
+            channels: vec![EpgChannel {
+                id: "ch1".into(),
+                display_name: smallvec![EpgStringWithLang::new("   ")],
+                ..Default::default()
+            }],
+            programmes: vec![],
+        };
+        let err = write(&blank_display_name).unwrap_err();
+        assert!(matches!(err, XmltvError::Validation(_)));
+    }
+
+    #[test]
     fn write_rejects_out_of_range_timestamp() {
         let doc = XmltvDocument {
             channels: vec![],
@@ -1185,6 +1219,8 @@ mod tests {
     <video><aspect></aspect></video>
     <audio><stereo></stereo></audio>
     <subtitles><language></language></subtitles>
+    <review type="text"></review>
+    <review source="NYT"/>
     <premiere></premiere>
     <last-chance lang="en"></last-chance>
     <image></image>
@@ -1208,6 +1244,7 @@ mod tests {
         assert!(!written.contains("<video>"));
         assert!(!written.contains("<audio>"));
         assert!(!written.contains("<image"));
+        assert!(!written.contains("<review"));
         assert!(written.contains("<premiere/>"));
         assert!(written.contains("<last-chance/>"));
         assert!(written.contains("<subtitles/>"));
@@ -1228,6 +1265,7 @@ mod tests {
         assert!(programme.video.is_none());
         assert!(programme.audio.is_empty());
         assert!(programme.image.is_empty());
+        assert!(programme.review.is_empty());
         assert!(programme.is_premiere);
         assert!(programme.is_last_chance);
         assert_eq!(programme.subtitles.len(), 1);
