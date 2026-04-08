@@ -123,9 +123,7 @@ fn write_programme(out: &mut String, prog: &EpgProgramme) -> Result<(), XmltvErr
     }
 
     if let Some(ref date) = prog.date {
-        out.push_str("    <date>");
-        write_escaped(out, date);
-        out.push_str("</date>\n");
+        write_text_element(out, "    ", "date", date);
     }
     for category in &prog.category {
         write_string_with_lang(out, "category", category);
@@ -152,15 +150,17 @@ fn write_programme(out: &mut String, prog: &EpgProgramme) -> Result<(), XmltvErr
         write_string_with_lang(out, "country", country);
     }
     for episode_num in &prog.episode_num {
-        out.push_str("    <episode-num");
-        if let Some(ref system) = episode_num.system {
-            out.push_str(" system=\"");
-            write_escaped(out, system);
-            out.push('"');
+        if !is_blank(&episode_num.value) {
+            out.push_str("    <episode-num");
+            if let Some(ref system) = episode_num.system {
+                out.push_str(" system=\"");
+                write_escaped(out, system);
+                out.push('"');
+            }
+            out.push('>');
+            write_escaped(out, &episode_num.value);
+            out.push_str("</episode-num>\n");
         }
-        out.push('>');
-        write_escaped(out, &episode_num.value);
-        out.push_str("</episode-num>\n");
     }
     if let Some(ref video) = prog.video {
         write_video(out, video);
@@ -193,30 +193,32 @@ fn write_programme(out: &mut String, prog: &EpgProgramme) -> Result<(), XmltvErr
         write_review(out, review)?;
     }
     for image in &prog.image {
-        out.push_str("    <image");
-        if let Some(ref image_type) = image.image_type {
-            out.push_str(" type=\"");
-            write_escaped(out, image_type);
-            out.push('"');
+        if !is_blank(&image.url) {
+            out.push_str("    <image");
+            if let Some(ref image_type) = image.image_type {
+                out.push_str(" type=\"");
+                write_escaped(out, image_type);
+                out.push('"');
+            }
+            if let Some(ref size) = image.size {
+                out.push_str(" size=\"");
+                write_escaped(out, size);
+                out.push('"');
+            }
+            if let Some(ref orient) = image.orient {
+                out.push_str(" orient=\"");
+                write_escaped(out, orient);
+                out.push('"');
+            }
+            if let Some(ref system) = image.system {
+                out.push_str(" system=\"");
+                write_escaped(out, system);
+                out.push('"');
+            }
+            out.push('>');
+            write_escaped(out, &image.url);
+            out.push_str("</image>\n");
         }
-        if let Some(ref size) = image.size {
-            out.push_str(" size=\"");
-            write_escaped(out, size);
-            out.push('"');
-        }
-        if let Some(ref orient) = image.orient {
-            out.push_str(" orient=\"");
-            write_escaped(out, orient);
-            out.push('"');
-        }
-        if let Some(ref system) = image.system {
-            out.push_str(" system=\"");
-            write_escaped(out, system);
-            out.push('"');
-        }
-        out.push('>');
-        write_escaped(out, &image.url);
-        out.push_str("</image>\n");
     }
 
     out.push_str("  </programme>\n");
@@ -234,9 +236,10 @@ fn validate_programme(prog: &EpgProgramme) -> Result<(), XmltvError> {
             "programme start is required for XMLTV serialization".into(),
         ));
     }
-    if prog.title.is_empty() {
+    if prog.title.iter().all(|title| is_blank(&title.value)) {
         return Err(XmltvError::Validation(
-            "programme title is required for XMLTV serialization".into(),
+            "programme title must contain at least one non-blank value for XMLTV serialization"
+                .into(),
         ));
     }
 
@@ -294,83 +297,106 @@ fn validate_review(review: &EpgReview) -> Result<(), XmltvError> {
 }
 
 fn write_credits(out: &mut String, credits: &EpgCredits) {
-    out.push_str("    <credits>\n");
+    let mut body = String::new();
+    let mut wrote_any = false;
+
     for person in &credits.director {
-        write_credit_person(out, "director", person);
+        wrote_any |= write_credit_person(&mut body, "director", person);
     }
     for person in &credits.actor {
-        write_credit_person(out, "actor", person);
+        wrote_any |= write_credit_person(&mut body, "actor", person);
     }
     for person in &credits.writer {
-        write_credit_person(out, "writer", person);
+        wrote_any |= write_credit_person(&mut body, "writer", person);
     }
     for person in &credits.adapter {
-        write_credit_person(out, "adapter", person);
+        wrote_any |= write_credit_person(&mut body, "adapter", person);
     }
     for person in &credits.producer {
-        write_credit_person(out, "producer", person);
+        wrote_any |= write_credit_person(&mut body, "producer", person);
     }
     for person in &credits.composer {
-        write_credit_person(out, "composer", person);
+        wrote_any |= write_credit_person(&mut body, "composer", person);
     }
     for person in &credits.editor {
-        write_credit_person(out, "editor", person);
+        wrote_any |= write_credit_person(&mut body, "editor", person);
     }
     for person in &credits.presenter {
-        write_credit_person(out, "presenter", person);
+        wrote_any |= write_credit_person(&mut body, "presenter", person);
     }
     for person in &credits.commentator {
-        write_credit_person(out, "commentator", person);
+        wrote_any |= write_credit_person(&mut body, "commentator", person);
     }
     for person in &credits.guest {
-        write_credit_person(out, "guest", person);
+        wrote_any |= write_credit_person(&mut body, "guest", person);
     }
+
+    if !wrote_any {
+        return;
+    }
+
+    out.push_str("    <credits>\n");
+    out.push_str(&body);
     out.push_str("    </credits>\n");
 }
 
-fn write_credit_person(out: &mut String, tag: &str, person: &EpgPerson) {
-    out.push_str("      <");
-    out.push_str(tag);
+fn write_credit_person(out: &mut String, tag: &str, person: &EpgPerson) -> bool {
+    let has_name = !is_blank(&person.name);
+    let has_children = !person.images.is_empty() || !person.urls.is_empty();
+
+    if !has_name && !has_children {
+        return false;
+    }
+
+    let mut body = String::new();
+    body.push_str("      <");
+    body.push_str(tag);
     if tag == "actor" {
         if let Some(ref role) = person.role {
-            out.push_str(" role=\"");
-            write_escaped(out, role);
-            out.push('"');
+            body.push_str(" role=\"");
+            write_escaped(&mut body, role);
+            body.push('"');
         }
         if person.guest {
-            out.push_str(" guest=\"yes\"");
+            body.push_str(" guest=\"yes\"");
         }
     }
-    out.push('>');
+    body.push('>');
 
-    let has_children = !person.images.is_empty() || !person.urls.is_empty();
-    if !person.name.is_empty() {
-        write_escaped(out, &person.name);
+    if has_name {
+        write_escaped(&mut body, &person.name);
     }
 
     if has_children {
-        out.push('\n');
+        body.push('\n');
         for image in &person.images {
-            out.push_str("        <image>");
-            write_escaped(out, image);
-            out.push_str("</image>\n");
+            body.push_str("        <image>");
+            write_escaped(&mut body, image);
+            body.push_str("</image>\n");
         }
         for url in &person.urls {
-            out.push_str("        <url>");
-            write_escaped(out, url);
-            out.push_str("</url>\n");
+            body.push_str("        <url>");
+            write_escaped(&mut body, url);
+            body.push_str("</url>\n");
         }
-        out.push_str("      </");
-        out.push_str(tag);
-        out.push_str(">\n");
+        body.push_str("      </");
+        body.push_str(tag);
+        body.push_str(">\n");
     } else {
-        out.push_str("</");
-        out.push_str(tag);
-        out.push_str(">\n");
+        body.push_str("</");
+        body.push_str(tag);
+        body.push_str(">\n");
     }
+
+    out.push_str(&body);
+    true
 }
 
-fn write_string_with_lang(out: &mut String, tag: &str, swl: &EpgStringWithLang) {
+fn write_string_with_lang(out: &mut String, tag: &str, swl: &EpgStringWithLang) -> bool {
+    if is_blank(&swl.value) {
+        return false;
+    }
+
     out.push_str("    <");
     out.push_str(tag);
     if let Some(ref lang) = swl.lang {
@@ -383,6 +409,8 @@ fn write_string_with_lang(out: &mut String, tag: &str, swl: &EpgStringWithLang) 
     out.push_str("</");
     out.push_str(tag);
     out.push_str(">\n");
+
+    true
 }
 
 fn write_length(out: &mut String, length: &EpgLength) {
@@ -415,6 +443,10 @@ fn write_icon(out: &mut String, icon: &EpgIcon) {
 }
 
 fn write_url(out: &mut String, url: &EpgUrl) {
+    if is_blank(&url.value) {
+        return;
+    }
+
     out.push_str("    <url");
     if let Some(ref system) = url.system {
         out.push_str(" system=\"");
@@ -427,6 +459,10 @@ fn write_url(out: &mut String, url: &EpgUrl) {
 }
 
 fn write_rating(out: &mut String, tag: &str, rating: &EpgRating) {
+    if is_blank(&rating.value) {
+        return;
+    }
+
     out.push_str("    <");
     out.push_str(tag);
     if let Some(ref system) = rating.system {
@@ -460,42 +496,46 @@ fn write_rating(out: &mut String, tag: &str, rating: &EpgRating) {
 }
 
 fn write_video(out: &mut String, video: &EpgVideo) {
-    out.push_str("    <video>\n");
+    let mut body = String::new();
     if let Some(present) = video.present {
-        out.push_str("      <present>");
-        out.push_str(if present { "yes" } else { "no" });
-        out.push_str("</present>\n");
+        body.push_str("      <present>");
+        body.push_str(if present { "yes" } else { "no" });
+        body.push_str("</present>\n");
     }
     if let Some(colour) = video.colour {
-        out.push_str("      <colour>");
-        out.push_str(if colour { "yes" } else { "no" });
-        out.push_str("</colour>\n");
+        body.push_str("      <colour>");
+        body.push_str(if colour { "yes" } else { "no" });
+        body.push_str("</colour>\n");
     }
     if let Some(ref aspect) = video.aspect {
-        out.push_str("      <aspect>");
-        write_escaped(out, aspect);
-        out.push_str("</aspect>\n");
+        write_text_element(&mut body, "      ", "aspect", aspect);
     }
     if let Some(ref quality) = video.quality {
-        out.push_str("      <quality>");
-        write_escaped(out, quality);
-        out.push_str("</quality>\n");
+        write_text_element(&mut body, "      ", "quality", quality);
     }
+    if body.is_empty() {
+        return;
+    }
+    out.push_str("    <video>\n");
+    out.push_str(&body);
     out.push_str("    </video>\n");
 }
 
 fn write_audio(out: &mut String, audio: &EpgAudio) {
-    out.push_str("    <audio>\n");
+    let mut body = String::new();
     if let Some(present) = audio.present {
-        out.push_str("      <present>");
-        out.push_str(if present { "yes" } else { "no" });
-        out.push_str("</present>\n");
+        body.push_str("      <present>");
+        body.push_str(if present { "yes" } else { "no" });
+        body.push_str("</present>\n");
     }
     if let Some(ref stereo) = audio.stereo {
-        out.push_str("      <stereo>");
-        write_escaped(out, stereo);
-        out.push_str("</stereo>\n");
+        write_text_element(&mut body, "      ", "stereo", stereo);
     }
+    if body.is_empty() {
+        return;
+    }
+    out.push_str("    <audio>\n");
+    out.push_str(&body);
     out.push_str("    </audio>\n");
 }
 
@@ -518,7 +558,9 @@ fn write_previously_shown(out: &mut String, prog: &EpgProgramme) -> Result<(), X
 }
 
 fn write_optional_text_flag(out: &mut String, tag: &str, value: Option<&EpgStringWithLang>) {
-    if let Some(value) = value {
+    if let Some(value) = value
+        && !is_blank(&value.value)
+    {
         out.push_str("    <");
         out.push_str(tag);
         if let Some(ref lang) = value.lang {
@@ -550,7 +592,9 @@ fn write_subtitles(out: &mut String, subtitles: &EpgSubtitles) {
         out.push('"');
     }
 
-    if let Some(ref language) = subtitles.language {
+    if let Some(ref language) = subtitles.language
+        && !is_blank(&language.value)
+    {
         out.push_str(">\n");
         out.push_str("      <language");
         if let Some(ref lang) = language.lang {
@@ -614,6 +658,23 @@ fn write_escaped(out: &mut String, s: &str) {
 
 fn is_blank(s: &str) -> bool {
     s.trim().is_empty()
+}
+
+fn write_text_element(out: &mut String, indent: &str, tag: &str, value: &str) -> bool {
+    if is_blank(value) {
+        return false;
+    }
+
+    out.push_str(indent);
+    out.push('<');
+    out.push_str(tag);
+    out.push('>');
+    write_escaped(out, value);
+    out.push_str("</");
+    out.push_str(tag);
+    out.push_str(">\n");
+
+    true
 }
 
 #[cfg(test)]
@@ -1075,6 +1136,18 @@ mod tests {
         };
         let err = write(&blank_review_value).unwrap_err();
         assert!(matches!(err, XmltvError::Validation(_)));
+
+        let blank_title_value = XmltvDocument {
+            channels: vec![],
+            programmes: vec![EpgProgramme {
+                channel: "ch1".into(),
+                start: Some(0),
+                title: smallvec![EpgStringWithLang::new("   ")],
+                ..Default::default()
+            }],
+        };
+        let err = write(&blank_title_value).unwrap_err();
+        assert!(matches!(err, XmltvError::Validation(_)));
     }
 
     #[test]
@@ -1091,5 +1164,73 @@ mod tests {
 
         let err = write(&doc).unwrap_err();
         assert!(matches!(err, XmltvError::Timestamp(_)));
+    }
+
+    #[test]
+    fn write_skips_blank_optional_text_nodes_preserved_by_parser() {
+        let parsed = crate::parse(
+            r#"<tv>
+  <programme start="20250115120000 +0000" channel="ch1">
+    <title>Show</title>
+    <sub-title></sub-title>
+    <desc lang="en"></desc>
+    <category></category>
+    <keyword></keyword>
+    <language></language>
+    <orig-language lang="fr"></orig-language>
+    <country></country>
+    <episode-num system="xmltv_ns"></episode-num>
+    <credits><writer></writer></credits>
+    <rating><value></value></rating>
+    <video><aspect></aspect></video>
+    <audio><stereo></stereo></audio>
+    <subtitles><language></language></subtitles>
+    <premiere></premiere>
+    <last-chance lang="en"></last-chance>
+    <image></image>
+  </programme>
+</tv>"#,
+        )
+        .unwrap();
+
+        let written = write(&parsed).unwrap();
+        assert!(written.contains("<title>Show</title>"));
+        assert!(!written.contains("<sub-title"));
+        assert!(!written.contains("<desc"));
+        assert!(!written.contains("<category"));
+        assert!(!written.contains("<keyword"));
+        assert!(!written.contains("<language></language>"));
+        assert!(!written.contains("<orig-language"));
+        assert!(!written.contains("<country"));
+        assert!(!written.contains("<episode-num"));
+        assert!(!written.contains("<credits>"));
+        assert!(!written.contains("<rating"));
+        assert!(!written.contains("<video>"));
+        assert!(!written.contains("<audio>"));
+        assert!(!written.contains("<image"));
+        assert!(written.contains("<premiere/>"));
+        assert!(written.contains("<last-chance/>"));
+        assert!(written.contains("<subtitles/>"));
+
+        let reparsed = crate::parse(&written).unwrap();
+        let programme = &reparsed.programmes[0];
+        assert_eq!(programme.title[0].value, "Show");
+        assert!(programme.sub_title.is_empty());
+        assert!(programme.desc.is_empty());
+        assert!(programme.category.is_empty());
+        assert!(programme.keyword.is_empty());
+        assert!(programme.language.is_empty());
+        assert!(programme.orig_language.is_none());
+        assert!(programme.country.is_empty());
+        assert!(programme.episode_num.is_empty());
+        assert!(programme.credits.is_none());
+        assert!(programme.rating.is_empty());
+        assert!(programme.video.is_none());
+        assert!(programme.audio.is_empty());
+        assert!(programme.image.is_empty());
+        assert!(programme.is_premiere);
+        assert!(programme.is_last_chance);
+        assert_eq!(programme.subtitles.len(), 1);
+        assert!(programme.subtitles[0].language.is_none());
     }
 }

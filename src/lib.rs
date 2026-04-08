@@ -17,6 +17,8 @@
 //! - exact byte-for-byte source fidelity is not guaranteed
 //! - serialization validates required programme fields instead of silently
 //!   emitting malformed XMLTV
+//! - blank optional text nodes are omitted on write instead of being serialized
+//!   back out as empty XMLTV content
 //!
 //! # Usage
 //!

@@ -69,7 +69,8 @@ Intentional omissions or non-goals:
 
 Writer/parser validation notes:
 - programme parsing rejects malformed required `start` / `channel` attributes and invalid XMLTV timestamps, while accepting the XMLTV upstream `Date::Manip` short-zone table for named suffixes such as `BST`, `HKT`, `GMT+10`, and military-zone letters; full IANA names like `Europe/Berlin` remain intentionally unsupported
-- writer serialization is fallible and rejects invalid programmes, blank channel ids, and empty or invalid reviews instead of emitting malformed XMLTV
+- writer serialization is fallible and rejects invalid programmes, blank-only required titles, blank channel ids, and empty or invalid reviews instead of emitting malformed XMLTV
+- blank optional text nodes preserved by parsing are omitted on write instead of being re-emitted as empty XMLTV content
 - `<length>` values preserve explicit XMLTV units; legacy unit-less lengths are normalized to minutes on parse
 
 ## Typical Uses
