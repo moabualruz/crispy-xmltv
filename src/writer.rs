@@ -1,8 +1,9 @@
 //! XMLTV writer — serializes `XmltvDocument` to valid XMLTV XML.
 
 use crispy_iptv_types::epg::{
-    EpgAudio, EpgChannel, EpgCredits, EpgIcon, EpgLength, EpgLengthUnit, EpgPerson, EpgProgramme,
-    EpgRating, EpgReview, EpgStringWithLang, EpgSubtitles, EpgUrl, EpgVideo,
+    EpgAudio, EpgChannel, EpgCredits, EpgIcon, EpgLength, EpgLengthUnit, EpgPerson,
+    EpgPersonContent, EpgProgramme, EpgRating, EpgReview, EpgReviewType, EpgStringWithLang,
+    EpgSubtitles, EpgUrl, EpgVideo,
 };
 
 use crate::error::XmltvError;
@@ -283,20 +284,6 @@ fn validate_channel(ch: &EpgChannel) -> Result<(), XmltvError> {
 }
 
 fn validate_review(review: &EpgReview) -> Result<(), XmltvError> {
-    let review_type = review
-        .review_type
-        .as_deref()
-        .filter(|value| !is_blank(value))
-        .ok_or_else(|| {
-            XmltvError::Validation("review type is required for XMLTV serialization".into())
-        })?;
-
-    if !matches!(review_type, "text" | "url") {
-        return Err(XmltvError::Validation(format!(
-            "review type `{review_type}` is invalid for XMLTV serialization"
-        )));
-    }
-
     if is_blank(&review.value) {
         return Err(XmltvError::Validation(
             "review value is required for XMLTV serialization".into(),
@@ -351,10 +338,7 @@ fn write_credits(out: &mut String, credits: &EpgCredits) {
 }
 
 fn write_credit_person(out: &mut String, tag: &str, person: &EpgPerson) -> bool {
-    let has_name = !is_blank(&person.name);
-    let has_children = !person.images.is_empty() || !person.urls.is_empty();
-
-    if !has_name && !has_children {
+    if person.content.is_empty() {
         return false;
     }
 
@@ -373,22 +357,67 @@ fn write_credit_person(out: &mut String, tag: &str, person: &EpgPerson) -> bool 
     }
     body.push('>');
 
-    if has_name {
-        write_escaped(&mut body, &person.name);
-    }
+    let has_children = person
+        .content
+        .iter()
+        .any(|content| matches!(content, EpgPersonContent::Image(_) | EpgPersonContent::Url(_)));
 
     if has_children {
         body.push('\n');
-        for image in &person.images {
-            body.push_str("        <image>");
-            write_escaped(&mut body, image);
-            body.push_str("</image>\n");
+    }
+
+    for content in &person.content {
+        match content {
+            EpgPersonContent::Text(text) => {
+                if has_children {
+                    body.push_str("        ");
+                    write_escaped(&mut body, text);
+                    body.push('\n');
+                } else {
+                    write_escaped(&mut body, text);
+                }
+            }
+            EpgPersonContent::Image(image) => {
+                body.push_str("        <image");
+                if let Some(ref image_type) = image.image_type {
+                    body.push_str(" type=\"");
+                    write_escaped(&mut body, image_type);
+                    body.push('"');
+                }
+                if let Some(ref size) = image.size {
+                    body.push_str(" size=\"");
+                    write_escaped(&mut body, size);
+                    body.push('"');
+                }
+                if let Some(ref orient) = image.orient {
+                    body.push_str(" orient=\"");
+                    write_escaped(&mut body, orient);
+                    body.push('"');
+                }
+                if let Some(ref system) = image.system {
+                    body.push_str(" system=\"");
+                    write_escaped(&mut body, system);
+                    body.push('"');
+                }
+                body.push('>');
+                write_escaped(&mut body, &image.url);
+                body.push_str("</image>\n");
+            }
+            EpgPersonContent::Url(url) => {
+                body.push_str("        <url");
+                if let Some(ref system) = url.system {
+                    body.push_str(" system=\"");
+                    write_escaped(&mut body, system);
+                    body.push('"');
+                }
+                body.push('>');
+                write_escaped(&mut body, &url.value);
+                body.push_str("</url>\n");
+            }
         }
-        for url in &person.urls {
-            body.push_str("        <url>");
-            write_escaped(&mut body, url);
-            body.push_str("</url>\n");
-        }
+    }
+
+    if has_children {
         body.push_str("      </");
         body.push_str(tag);
         body.push_str(">\n");
@@ -623,10 +652,10 @@ fn write_subtitles(out: &mut String, subtitles: &EpgSubtitles) {
 
 fn write_review(out: &mut String, review: &EpgReview) -> Result<(), XmltvError> {
     validate_review(review)?;
-    let review_type = review
-        .review_type
-        .as_deref()
-        .expect("validated review type is present");
+    let review_type = match review.review_type {
+        EpgReviewType::Text => "text",
+        EpgReviewType::Url => "url",
+    };
 
     out.push_str("    <review type=\"");
     write_escaped(out, review_type);
@@ -841,7 +870,7 @@ mod tests {
                 }],
                 review: smallvec![EpgReview {
                     value: "Great show".into(),
-                    review_type: Some("text".into()),
+                    review_type: EpgReviewType::Text,
                     source: Some("NYT".into()),
                     reviewer: Some("Jane".into()),
                     lang: Some("en".into()),
@@ -945,7 +974,7 @@ mod tests {
             desc: smallvec![EpgStringWithLang::new("Description")],
             credits: Some(EpgCredits {
                 director: smallvec![EpgPerson {
-                    name: "Director".into(),
+                    content: smallvec![EpgPersonContent::Text("Director".into())],
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -1007,13 +1036,13 @@ mod tests {
                 system: Some("imdb".into()),
                 icons: smallvec![],
             }],
-            review: smallvec![EpgReview {
-                value: "Great".into(),
-                review_type: Some("text".into()),
-                source: None,
-                reviewer: None,
-                lang: None,
-            }],
+                review: smallvec![EpgReview {
+                    value: "Great".into(),
+                    review_type: EpgReviewType::Text,
+                    source: None,
+                    reviewer: None,
+                    lang: None,
+                }],
             image: smallvec![crispy_iptv_types::epg::EpgImage {
                 url: "https://example.com/poster.jpg".into(),
                 image_type: Some("poster".into()),
@@ -1121,14 +1150,14 @@ mod tests {
                 title: smallvec![EpgStringWithLang::new("Show")],
                 review: smallvec![EpgReview {
                     value: "Great show".into(),
-                    review_type: Some("html".into()),
+                    review_type: EpgReviewType::Text,
                     ..Default::default()
                 }],
                 ..Default::default()
             }],
         };
-        let err = write(&invalid_review_type).unwrap_err();
-        assert!(matches!(err, XmltvError::Validation(_)));
+        let xml = write(&invalid_review_type).unwrap();
+        assert!(xml.contains("<review type=\"text\""));
 
         let blank_review_value = XmltvDocument {
             channels: vec![],
@@ -1138,7 +1167,7 @@ mod tests {
                 title: smallvec![EpgStringWithLang::new("Show")],
                 review: smallvec![EpgReview {
                     value: "   ".into(),
-                    review_type: Some("text".into()),
+                    review_type: EpgReviewType::Text,
                     ..Default::default()
                 }],
                 ..Default::default()

@@ -8,8 +8,8 @@ use std::io::BufRead;
 
 use crispy_iptv_types::epg::{
     EpgAudio, EpgChannel, EpgCredits, EpgEpisodeNumber, EpgIcon, EpgImage, EpgLength,
-    EpgLengthUnit, EpgPerson, EpgPreviouslyShown, EpgProgramme, EpgRating, EpgReview,
-    EpgStringWithLang, EpgSubtitleType, EpgSubtitles, EpgUrl, EpgVideo,
+    EpgLengthUnit, EpgPerson, EpgPersonContent, EpgPreviouslyShown, EpgProgramme, EpgRating,
+    EpgReview, EpgReviewType, EpgStringWithLang, EpgSubtitleType, EpgSubtitles, EpgUrl, EpgVideo,
 };
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
@@ -307,7 +307,7 @@ fn parse_programme_body<R: BufRead>(
                     prog.subtitles.push(parse_subtitles(reader, e)?);
                 }
                 b"review" => {
-                    let review_type = get_attr(e, b"type");
+                    let review_type = parse_review_type(get_attr(e, b"type").as_deref())?;
                     let source = get_attr(e, b"source");
                     let reviewer = get_attr(e, b"reviewer");
                     let lang = get_attr(e, b"lang");
@@ -353,7 +353,7 @@ fn parse_programme_body<R: BufRead>(
                     push_review_if_present(
                         &mut prog.review,
                         EpgReview {
-                            review_type: get_attr(e, b"type"),
+                            review_type: parse_review_type(get_attr(e, b"type").as_deref())?,
                             source: get_attr(e, b"source"),
                             reviewer: get_attr(e, b"reviewer"),
                             lang: get_attr(e, b"lang"),
@@ -611,24 +611,34 @@ fn parse_credit_person<R: BufRead>(
         match reader.read_event_into(&mut buf) {
             Ok(Event::Text(ref e)) => {
                 if let Ok(t) = e.unescape() {
-                    person.name.push_str(&t);
+                    if !t.is_empty() {
+                        person.content.push(EpgPersonContent::Text(t.into_owned()));
+                    }
                 }
             }
             Ok(Event::CData(ref e)) => {
                 if let Ok(t) = std::str::from_utf8(e.as_ref()) {
-                    person.name.push_str(t);
+                    if !t.is_empty() {
+                        person.content.push(EpgPersonContent::Text(t.to_string()));
+                    }
                 }
             }
             Ok(Event::Start(ref e)) if depth == 1 && e.name().as_ref() == b"image" => {
                 let image = read_text_content(reader)?;
                 if !image.is_empty() {
-                    person.images.push(image);
+                    person.content.push(EpgPersonContent::Image(EpgImage {
+                        url: image,
+                        ..Default::default()
+                    }));
                 }
             }
             Ok(Event::Start(ref e)) if depth == 1 && e.name().as_ref() == b"url" => {
                 let url = read_text_content(reader)?;
                 if !url.is_empty() {
-                    person.urls.push(url);
+                    person.content.push(EpgPersonContent::Url(EpgUrl {
+                        value: url,
+                        ..Default::default()
+                    }));
                 }
             }
             Ok(Event::Start(_)) => {
@@ -749,6 +759,16 @@ fn parse_icon_attrs(e: &BytesStart<'_>) -> EpgIcon {
 fn push_review_if_present(reviews: &mut SmallVec<[EpgReview; 1]>, review: EpgReview) {
     if !review.value.trim().is_empty() {
         reviews.push(review);
+    }
+}
+
+fn parse_review_type(value: Option<&str>) -> Result<EpgReviewType, XmltvError> {
+    match value.unwrap_or("text") {
+        "text" => Ok(EpgReviewType::Text),
+        "url" => Ok(EpgReviewType::Url),
+        other => Err(XmltvError::Xml(format!(
+            "review type `{other}` must be `text` or `url`"
+        ))),
     }
 }
 
@@ -935,23 +955,23 @@ mod tests {
         let credits = doc.programmes[0].credits.as_ref().unwrap();
 
         assert_eq!(credits.director.len(), 2);
-        assert_eq!(credits.director[0].name, "Steven Spielberg");
-        assert_eq!(credits.director[1].name, "James Cameron");
+        assert_eq!(credits.director[0].primary_text(), Some("Steven Spielberg"));
+        assert_eq!(credits.director[1].primary_text(), Some("James Cameron"));
 
         assert_eq!(credits.actor.len(), 2);
-        assert_eq!(credits.actor[0].name, "Tom Hanks");
+        assert_eq!(credits.actor[0].primary_text(), Some("Tom Hanks"));
         assert_eq!(credits.actor[0].role.as_deref(), Some("Hero"));
-        assert_eq!(credits.actor[1].name, "Meryl Streep");
+        assert_eq!(credits.actor[1].primary_text(), Some("Meryl Streep"));
         assert!(credits.actor[1].role.is_none());
 
-        assert_eq!(credits.writer[0].name, "Aaron Sorkin");
-        assert_eq!(credits.producer[0].name, "Kathleen Kennedy");
-        assert_eq!(credits.composer[0].name, "John Williams");
-        assert_eq!(credits.presenter[0].name, "Ryan Seacrest");
-        assert_eq!(credits.commentator[0].name, "John Madden");
+        assert_eq!(credits.writer[0].primary_text(), Some("Aaron Sorkin"));
+        assert_eq!(credits.producer[0].primary_text(), Some("Kathleen Kennedy"));
+        assert_eq!(credits.composer[0].primary_text(), Some("John Williams"));
+        assert_eq!(credits.presenter[0].primary_text(), Some("Ryan Seacrest"));
+        assert_eq!(credits.commentator[0].primary_text(), Some("John Madden"));
 
         assert_eq!(credits.guest.len(), 1);
-        assert_eq!(credits.guest[0].name, "Oprah Winfrey");
+        assert_eq!(credits.guest[0].primary_text(), Some("Oprah Winfrey"));
         assert!(credits.guest[0].guest);
     }
 
@@ -1426,13 +1446,13 @@ mod tests {
         assert_eq!(prog.review.len(), 2);
 
         assert_eq!(prog.review[0].value, "Great show");
-        assert_eq!(prog.review[0].review_type.as_deref(), Some("text"));
+        assert_eq!(prog.review[0].review_type, EpgReviewType::Text);
         assert_eq!(prog.review[0].source.as_deref(), Some("NYT"));
         assert_eq!(prog.review[0].reviewer.as_deref(), Some("Jane Doe"));
         assert_eq!(prog.review[0].lang.as_deref(), Some("en"));
 
         assert_eq!(prog.review[1].value, "https://example.com/review");
-        assert_eq!(prog.review[1].review_type.as_deref(), Some("url"));
+        assert_eq!(prog.review[1].review_type, EpgReviewType::Url);
         assert!(prog.review[1].source.is_none());
     }
 
@@ -1452,7 +1472,7 @@ mod tests {
 
         assert_eq!(prog.review.len(), 1);
         assert_eq!(prog.review[0].value, "Keeps this one");
-        assert_eq!(prog.review[0].review_type.as_deref(), Some("text"));
+        assert_eq!(prog.review[0].review_type, EpgReviewType::Text);
     }
 
     #[test]
