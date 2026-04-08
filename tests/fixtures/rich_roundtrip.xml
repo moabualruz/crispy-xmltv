@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<tv source-info-name="Fixture Provider" generator-info-name="crispy-xmltv-fixture">
+  <channel id="ch.rich">
+    <display-name lang="en">Rich Channel</display-name>
+    <display-name lang="ar">قناة غنية</display-name>
+    <icon src="https://example.com/logo.png" width="200" height="100"/>
+    <url system="official">https://example.com/watch</url>
+    <url system="mirror">https://mirror.example.com/watch</url>
+  </channel>
+  <programme start="20250115120000 +0000" stop="20250115130000 +0000" channel="ch.rich">
+    <title lang="en">Feature Show</title>
+    <sub-title lang="en">Episode Subtitle</sub-title>
+    <desc lang="en">Long-form description.</desc>
+    <category lang="en">Drama</category>
+    <keyword lang="en">Featured</keyword>
+    <orig-language lang="fr">French</orig-language>
+    <episode-num system="xmltv_ns">0.1.0/1</episode-num>
+    <episode-num system="onscreen">S01E02</episode-num>
+    <image type="poster" size="3" orient="P" system="tmdb">https://example.com/poster.jpg</image>
+    <rating system="MPAA">
+      <value>PG-13</value>
+    </rating>
+    <star-rating system="imdb">
+      <value>8.7/10</value>
+    </star-rating>
+    <review type="text" source="Example Review" reviewer="Editor" lang="en">Recommended.</review>
+    <video>
+      <present>yes</present>
+      <colour>yes</colour>
+      <aspect>16:9</aspect>
+      <quality>HDTV</quality>
+    </video>
+    <audio>
+      <present>yes</present>
+      <stereo>surround</stereo>
+    </audio>
+    <new/>
+    <premiere/>
+  </programme>
+</tv>

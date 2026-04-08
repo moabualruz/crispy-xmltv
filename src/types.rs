@@ -22,5 +22,6 @@ pub use crispy_iptv_types::epg::{
     EpgAudio as XmltvAudio, EpgChannel as XmltvChannel, EpgCredits as XmltvCredits,
     EpgEpisodeNumber as XmltvEpisodeNumber, EpgIcon as XmltvIcon, EpgImage as XmltvImage,
     EpgPerson as XmltvPerson, EpgProgramme as XmltvProgramme, EpgRating as XmltvRating,
-    EpgReview as XmltvReview, EpgStringWithLang as XmltvStringWithLang, EpgVideo as XmltvVideo,
+    EpgReview as XmltvReview, EpgStringWithLang as XmltvStringWithLang, EpgUrl as XmltvUrl,
+    EpgVideo as XmltvVideo,
 };

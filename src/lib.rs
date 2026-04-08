@@ -1,8 +1,18 @@
 //! Streaming XMLTV/EPG parser and writer.
 //!
-//! Faithfully translates the `@iptv/xmltv` TypeScript library into Rust,
-//! using `quick_xml` event-based parsing for efficient handling of 100 MB+
-//! EPG files without buffering the entire DOM.
+//! `crispy-xmltv` targets the practical XMLTV subset needed by IPTV guide
+//! pipelines while preserving the structured fields it models across
+//! parse/write/parse round-trips.
+//!
+//! Supported coverage includes channel display names, icons, multiple URLs with
+//! optional `system` attributes, and the major programme metadata fields such as
+//! titles, descriptions, categories, credits, ratings, reviews, episode
+//! numbers, images, and media flags.
+//!
+//! Intentional omissions are documented rather than hidden:
+//! - root `<tv>` metadata attributes are not modeled
+//! - exact byte-for-byte source fidelity is not guaranteed
+//! - `<language>` text is currently skipped rather than mapped to a dedicated field
 //!
 //! # Usage
 //!

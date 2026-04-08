@@ -51,6 +51,22 @@ assert!(output.contains("programme"));
 - `XmltvError`
 - shared EPG types re-exported through `types`
 
+## Coverage
+
+The crate is aimed at a practical, explicitly documented XMLTV subset.
+
+Supported and round-trippable fields include:
+- channel `display-name`, `icon`, and multiple `url` elements with optional `system`
+- programme titles, subtitles, descriptions, categories, dates, lengths, credits
+- episode numbers with `system`
+- `image` metadata including `type`, `size`, `orient`, and `system`
+- `rating`, `star-rating`, `review`, `video`, `audio`, `keyword`, and boolean flags
+
+Intentional omissions or non-goals:
+- root `<tv>` metadata attributes are not modeled
+- `<language>` text is currently skipped rather than mapped to a dedicated field
+- writing preserves structured meaning, not byte-for-byte source formatting
+
 ## Typical Uses
 
 - loading guide data from XMLTV feeds
