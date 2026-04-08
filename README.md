@@ -2,24 +2,27 @@
 
 Streaming XMLTV parser and writer for large EPG inputs.
 
-## Status
+## What This Crate Is
 
-Extracted from CrispyTivi. Intended as a reusable Rust crate for XMLTV ingestion, transformation, and serialization.
+`crispy-xmltv` is an event-driven XMLTV reader/writer intended for guide import pipelines and IPTV applications. It favors streaming-style parsing over DOM-style full buffering so large guide files remain practical.
 
-## What This Crate Provides
+## What It Provides
 
-- event-driven XMLTV parsing
-- support for large files without DOM-style full buffering
-- typed programme/channel output
-- XMLTV writing support
-- compressed input helpers for common archive formats
+- `parse(&str)`
+- `parse_reader(...)`
+- `parse_compressed(...)`
+- `write(&XmltvDocument)`
+- automatic decompression helpers for common compressed XMLTV inputs
+- episode-number parsing helpers
 
 ## Installation
 
 ```toml
 [dependencies]
-crispy-xmltv = "0.1"
+crispy-xmltv = "0.1.1"
 ```
+
+MSRV: Rust `1.85`
 
 ## Quick Start
 
@@ -38,28 +41,33 @@ let doc = parse(xml).unwrap();
 assert_eq!(doc.channels.len(), 1);
 assert_eq!(doc.programmes.len(), 1);
 
-let out = write(&doc);
-assert!(out.contains("channel"));
+let output = write(&doc);
+assert!(output.contains("programme"));
 ```
 
-## Primary Use Cases
+## Main Types
 
-- EPG ingestion pipelines
-- guide normalization/transformation
-- IPTV app backends
-- EPG archival tools
+- `XmltvDocument`
+- `XmltvError`
+- shared EPG types re-exported through `types`
 
-## Relationship To Other Crates
+## Typical Uses
 
-- uses `crispy-iptv-types` EPG models
-- can feed app-specific mapping layers such as those in CrispyTivi
+- loading guide data from XMLTV feeds
+- transforming XMLTV into internal application models
+- exporting or cleaning guide documents
+- working with compressed `.gz` / `.xz` guide sources
 
-## Non-Goals
+## Related Crates
 
-- network fetching
-- provider-specific scheduling logic
-- persistence
+- `crispy-iptv-types` for shared EPG models
 
-## Caveats
+## Current Limitations
 
-- public docs should clearly state supported XMLTV variations and compression formats before release
+- network fetching is intentionally out of scope
+- provider-specific merge/match policy is out of scope
+- caller is responsible for persistence and source refresh strategy
+
+## License
+
+See `LICENSE.md` and `NOTICE.md`.
