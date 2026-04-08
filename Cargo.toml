@@ -13,7 +13,7 @@ categories = ["multimedia", "parser-implementations"]
 rust-version = "1.85"
 
 [dependencies]
-crispy-iptv-types = "0.1.1"
+crispy-iptv-types = { git = "https://github.com/moabualruz/crispy-iptv-types", branch = "main" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 quick-xml = "0.37"
