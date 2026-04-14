@@ -71,6 +71,16 @@ pub fn decompress_xz(data: &[u8]) -> Result<Vec<u8>, XmltvError> {
         return Ok(Vec::new());
     }
 
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = data;
+        return Err(XmltvError::Decompression(
+            "XZ decompression is unavailable on wasm32 targets".to_string(),
+        ));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
     let mut decoder = xz2::read::XzDecoder::new(data);
     let mut decompressed = Vec::with_capacity(data.len() * 4);
     decoder
@@ -78,6 +88,7 @@ pub fn decompress_xz(data: &[u8]) -> Result<Vec<u8>, XmltvError> {
         .map_err(|e| XmltvError::Decompression(format!("XZ decompression failed: {e}")))?;
 
     Ok(decompressed)
+    }
 }
 
 #[cfg(test)]
@@ -94,6 +105,7 @@ mod tests {
         encoder.finish().unwrap()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Helper: compress `data` with XZ for round-trip tests.
     fn xz_compress(data: &[u8]) -> Vec<u8> {
         use std::io::Write;
@@ -121,6 +133,7 @@ mod tests {
         assert!(!is_gzip(&[]));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn is_xz_detects_magic_bytes() {
         let compressed = xz_compress(b"hello");
@@ -146,6 +159,7 @@ mod tests {
         assert_eq!(decompressed, original);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn decompress_xz_roundtrip() {
         let original = b"<?xml version=\"1.0\"?><tv><channel id=\"ch1\"><display-name>Test</display-name></channel></tv>";
@@ -162,6 +176,7 @@ mod tests {
         assert_eq!(result, original);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn decompress_auto_detects_xz() {
         let original = b"hello xz world";
@@ -187,6 +202,13 @@ mod tests {
     fn decompress_xz_empty_input() {
         let result = decompress_xz(&[]).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn decompress_xz_reports_unavailable_on_wasm() {
+        let result = decompress_xz(&[0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00]);
+        assert!(matches!(result, Err(XmltvError::Decompression(_))));
     }
 
     #[test]
