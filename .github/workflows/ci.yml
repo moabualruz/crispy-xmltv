@@ -14,177 +14,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  prepare-pr-source:
-    if: github.event_name == 'pull_request'
-    runs-on: ${{ fromJSON(github.event.pull_request.head.repo.full_name == github.repository && format('["self-hosted","linux","x64","generic","pr-{0}-{1}"]', github.repository_id, github.event.pull_request.number) || '["ubuntu-latest"]') }}
-    outputs:
-      runner_labels: ${{ steps.route.outputs.runner_labels }}
+  ci:
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && format('["self-hosted","linux","x64","generic","pr-{0}-{1}"]', github.repository_id, github.event.pull_request.number)) || (github.event_name == 'pull_request' && '["ubuntu-latest"]') || '["self-hosted","linux","x64","generic"]') }}
     steps:
-      - id: route
-        name: Select runner route
-        env:
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          BASE_REPOSITORY: ${{ github.repository }}
-          REPOSITORY_ID: ${{ github.repository_id }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          if [[ "$HEAD_REPOSITORY" == "$BASE_REPOSITORY" ]]; then
-            printf 'runner_labels=["self-hosted","linux","x64","generic","pr-%s-%s"]\n' "$REPOSITORY_ID" "$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          else
-            printf 'runner_labels=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/checkout@v4
-        if: github.event.pull_request.head.repo.full_name != github.repository
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Verify broker-prepared same-repository source
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          test -L "$GITHUB_WORKSPACE"
+          test "$(git rev-parse --show-toplevel)" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)"
+          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$GITHUB_SHA"
       - uses: dtolnay/rust-toolchain@stable
-        if: github.event.pull_request.head.repo.full_name != github.repository
         with:
           toolchain: stable
           components: rustfmt, clippy
-      - name: Verify broker-prepared same-repository source
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          test -L "$GITHUB_WORKSPACE"
-          test "$(git rev-parse --show-toplevel)" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)"
-          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$GITHUB_SHA"
-      - name: Run fork gates concurrently in the checked-out workspace
-        if: github.event.pull_request.head.repo.full_name != github.repository
-        run: bash .github/run-fork-gates.sh
-
-  fmt:
-    needs: prepare-pr-source
-    if: ${{ always() && (needs.prepare-pr-source.result == 'success' || (github.event_name != 'pull_request' && needs.prepare-pr-source.result == 'skipped')) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON(needs.prepare-pr-source.outputs.runner_labels || '["self-hosted","linux","x64","generic"]') }}
-    steps:
-      - uses: actions/checkout@v4
-        if: github.event_name != 'pull_request'
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Verify same-repository PR source
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          test -L "$GITHUB_WORKSPACE"
-          test "$(git rev-parse --show-toplevel)" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)"
-          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$GITHUB_SHA"
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          components: rustfmt
-      - name: Isolate cargo output
-        run: printf 'CARGO_TARGET_DIR=%s/cargo-target/%s/%s/%s\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_JOB" >> "$GITHUB_ENV"
-      - run: cargo fmt --check
-
-  clippy:
-    needs: prepare-pr-source
-    if: ${{ always() && (needs.prepare-pr-source.result == 'success' || (github.event_name != 'pull_request' && needs.prepare-pr-source.result == 'skipped')) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON(needs.prepare-pr-source.outputs.runner_labels || '["self-hosted","linux","x64","generic"]') }}
-    steps:
-      - uses: actions/checkout@v4
-        if: github.event_name != 'pull_request'
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Verify same-repository PR source
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          test -L "$GITHUB_WORKSPACE"
-          test "$(git rev-parse --show-toplevel)" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)"
-          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$GITHUB_SHA"
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          components: clippy
-      - name: Isolate cargo output
-        run: printf 'CARGO_TARGET_DIR=%s/cargo-target/%s/%s/%s\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_JOB" >> "$GITHUB_ENV"
-      - run: cargo clippy --all-targets --all-features -- -D warnings
-
-  cargo-test:
-    needs: prepare-pr-source
-    if: ${{ always() && (needs.prepare-pr-source.result == 'success' || (github.event_name != 'pull_request' && needs.prepare-pr-source.result == 'skipped')) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON(needs.prepare-pr-source.outputs.runner_labels || '["self-hosted","linux","x64","generic"]') }}
-    steps:
-      - uses: actions/checkout@v4
-        if: github.event_name != 'pull_request'
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Verify same-repository PR source
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          test -L "$GITHUB_WORKSPACE"
-          test "$(git rev-parse --show-toplevel)" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)"
-          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$GITHUB_SHA"
-      - uses: dtolnay/rust-toolchain@stable
-        with: { toolchain: stable }
-      - name: Isolate cargo output
-        run: printf 'CARGO_TARGET_DIR=%s/cargo-target/%s/%s/%s\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_JOB" >> "$GITHUB_ENV"
-      - run: cargo test --all-features
-      - run: bash tests/runner-contract.test.sh
-
-  doc:
-    needs: prepare-pr-source
-    if: ${{ always() && (needs.prepare-pr-source.result == 'success' || (github.event_name != 'pull_request' && needs.prepare-pr-source.result == 'skipped')) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON(needs.prepare-pr-source.outputs.runner_labels || '["self-hosted","linux","x64","generic"]') }}
-    steps:
-      - uses: actions/checkout@v4
-        if: github.event_name != 'pull_request'
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Verify same-repository PR source
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          test -L "$GITHUB_WORKSPACE"
-          test "$(git rev-parse --show-toplevel)" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)"
-          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$GITHUB_SHA"
-      - uses: dtolnay/rust-toolchain@stable
-        with: { toolchain: stable }
-      - name: Isolate cargo output
-        run: printf 'CARGO_TARGET_DIR=%s/cargo-target/%s/%s/%s\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_JOB" >> "$GITHUB_ENV"
-      - run: cargo doc --no-deps
-
-  package:
-    needs: prepare-pr-source
-    if: ${{ always() && (needs.prepare-pr-source.result == 'success' || (github.event_name != 'pull_request' && needs.prepare-pr-source.result == 'skipped')) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON(needs.prepare-pr-source.outputs.runner_labels || '["self-hosted","linux","x64","generic"]') }}
-    steps:
-      - uses: actions/checkout@v4
-        if: github.event_name != 'pull_request'
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Verify same-repository PR source
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          test -L "$GITHUB_WORKSPACE"
-          test "$(git rev-parse --show-toplevel)" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)"
-          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$GITHUB_SHA"
-      - uses: dtolnay/rust-toolchain@stable
-        with: { toolchain: stable }
-      - name: Isolate cargo output
-        run: printf 'CARGO_TARGET_DIR=%s/cargo-target/%s/%s/%s\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_JOB" >> "$GITHUB_ENV"
-      - run: cargo package
+      - name: Run independent gates in the checked-out workspace
+        run: bash .github/run-ci-gates.sh
 
   required:
     if: ${{ always() }}
-    needs: [prepare-pr-source, fmt, clippy, cargo-test, doc, package]
+    needs: [ci]
     runs-on: ubuntu-latest
     steps:
-      - name: Require every gate to succeed
+      - name: Require the CI gate job to succeed
         env:
-          PREPARE_RESULT: ${{ needs.prepare-pr-source.result }}
-          GATE_RESULTS: ${{ needs.fmt.result }} ${{ needs.clippy.result }} ${{ needs.cargo-test.result }} ${{ needs.doc.result }} ${{ needs.package.result }}
-          EVENT_NAME: ${{ github.event_name }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          BASE_REPOSITORY: ${{ github.repository }}
-        run: |
-          if [[ "$EVENT_NAME" == pull_request && "$HEAD_REPOSITORY" != "$BASE_REPOSITORY" ]]; then
-            [[ "$PREPARE_RESULT" == success ]] || exit 1
-            [[ "$GATE_RESULTS" == "skipped skipped skipped skipped skipped" ]] || exit 1
-            exit 0
-          fi
-          [[ "$PREPARE_RESULT" == success || "$PREPARE_RESULT" == skipped ]] || exit 1
-          for result in $GATE_RESULTS; do [[ "$result" == success ]] || exit 1; done
+          CI_RESULT: ${{ needs.ci.result }}
+        run: test "$CI_RESULT" = success

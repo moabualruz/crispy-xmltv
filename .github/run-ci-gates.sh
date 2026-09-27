@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$RUNNER_TEMP/cargo-target/$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT/fork"
+root="$RUNNER_TEMP/cargo-target/$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT/ci"
 mkdir -p "$root"
 pids=()
 run_gate() {
