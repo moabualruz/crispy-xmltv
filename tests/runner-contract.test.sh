@@ -92,6 +92,7 @@ if ! PATH="$tmp/bin:$PATH" RUNNER_TEMP="$tmp" GITHUB_RUN_ID=contract GITHUB_RUN_
   exit 1
 fi
 test "$(wc -l < "$tmp/gates")" -eq 5
+test "$(grep -v '^fmt' "$tmp/gates" | grep -vc -- '--locked')" -eq 0
 test "$(cut -f2 "$tmp/gates" | sort -u | wc -l)" -eq 5
 if PATH="$tmp/bin:$PATH" RUNNER_TEMP="$tmp" GITHUB_RUN_ID=contract GITHUB_RUN_ATTEMPT=2 GATE_LOG="$tmp/failing-gates" FAIL_GATE=clippy /bin/bash "$root/.github/run-ci-gates.sh"; then
   echo 'parallel gate runner ignored a failing gate' >&2

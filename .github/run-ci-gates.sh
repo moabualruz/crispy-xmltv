@@ -11,10 +11,10 @@ run_gate() {
   pids+=("$!")
 }
 run_gate fmt cargo fmt --check
-run_gate clippy cargo clippy --all-targets --all-features -- -D warnings
-run_gate test cargo test --all-features
-run_gate doc cargo doc --no-deps
-run_gate package cargo package
+run_gate clippy cargo clippy --locked --all-targets --all-features -- -D warnings
+run_gate test cargo test --locked --all-features
+run_gate doc cargo doc --locked --no-deps
+run_gate package cargo package --locked
 run_gate contract bash tests/runner-contract.test.sh
 status=0
 for pid in "${pids[@]}"; do wait "$pid" || status=1; done
