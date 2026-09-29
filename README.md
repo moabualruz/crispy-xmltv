@@ -19,7 +19,7 @@ Streaming XMLTV parser and writer for large EPG inputs.
 
 ```toml
 [dependencies]
-crispy-xmltv = "0.1.1"
+crispy-xmltv = "0.1.2"
 ```
 
 MSRV: Rust `1.85`
