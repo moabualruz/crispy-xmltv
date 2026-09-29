@@ -28,6 +28,7 @@ jobs:
           test -L "$GITHUB_WORKSPACE"
           test "$(git rev-parse --show-toplevel)" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)"
           test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C "$GITHUB_WORKSPACE" status --porcelain --untracked-files=no)"
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable

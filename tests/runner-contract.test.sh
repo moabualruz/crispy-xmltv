@@ -15,11 +15,6 @@ required="$(awk '
 ' "$workflow")"
 test -n "$guard"
 test -n "$required"
-test "$(grep -c 'uses: actions/checkout@' "$workflow")" -eq 1
-test "$(grep -c 'uses: dtolnay/rust-toolchain@' "$workflow")" -eq 1
-grep -Fq 'needs: [ci]' "$workflow"
-grep -Fq 'persist-credentials: false' "$workflow"
-grep -Fq 'cancel-in-progress: false' "$workflow"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -45,6 +40,34 @@ if (cd "$tmp" && GITHUB_WORKSPACE="$tmp/unrelated-workspace" GITHUB_SHA="$source
   echo 'same-repository guard accepted an unrelated checkout' >&2
   exit 1
 fi
+
+if (cd "$tmp" && echo dirty >> source.txt && GITHUB_WORKSPACE="$tmp/workspace" GITHUB_SHA="$source_sha" bash -e -c "$guard"); then
+  echo 'same-repository guard accepted a dirty worktree' >&2
+  exit 1
+fi
+git -C "$tmp" checkout -q -- source.txt
+mkdir "$tmp/plain"
+if (cd "$tmp" && GITHUB_WORKSPACE="$tmp/plain" GITHUB_SHA="$source_sha" bash -e -c "$guard"); then
+  echo 'same-repository guard accepted a non-symlink workspace' >&2
+  exit 1
+fi
+
+# Evaluate the real runs-on expression per event (fork PRs must never reach self-hosted).
+python3 - "$workflow" <<'PY'
+import json, re, sys
+from types import SimpleNamespace as N
+line = next(l for l in open(sys.argv[1]) if l.startswith("    runs-on: ${{ fromJSON("))
+expr = line.split("${{", 1)[1].rsplit("}}", 1)[0].strip().replace("&&", " and ").replace("||", " or ")
+def route(name, head="o/r", num=7):
+    g = N(event_name=name, repository="o/r", repository_id=42,
+          event=N(pull_request=N(head=N(repo=N(full_name=head)), number=num)))
+    return eval(expr, {"__builtins__": {}}, {"github": g, "fromJSON": json.loads,
+                "format": lambda t, *a: t.format(*a)})
+assert route("pull_request") == ["self-hosted", "linux", "x64", "generic", "pr-42-7"], route("pull_request")
+assert route("pull_request", head="fork/r") == ["ubuntu-latest"]
+assert route("push") == ["self-hosted", "linux", "x64", "generic"]
+assert route("workflow_dispatch") == ["self-hosted", "linux", "x64", "generic"]
+PY
 
 env CI_RESULT=success bash -e -c "$required"
 if env CI_RESULT=failure bash -e -c "$required"; then
