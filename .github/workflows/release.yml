@@ -11,8 +11,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.repository_id }}
+  cancel-in-progress: false
+
 jobs:
   release-check:
+    if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, linux, x64, generic]
     steps:
       - uses: actions/checkout@v4

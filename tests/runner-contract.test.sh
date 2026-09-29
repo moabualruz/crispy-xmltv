@@ -19,6 +19,7 @@ test -n "$required"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 git -C "$tmp" init -q
+printf 'workspace\nunrelated\nunrelated-workspace\nplain\n' > "$tmp/.git/info/exclude"
 git -C "$tmp" config user.name 'Runner contract test'
 git -C "$tmp" config user.email 'runner-contract@example.invalid'
 printf 'PR source\n' > "$tmp/source.txt"
@@ -46,6 +47,11 @@ if (cd "$tmp" && echo dirty >> source.txt && GITHUB_WORKSPACE="$tmp/workspace" G
   exit 1
 fi
 git -C "$tmp" checkout -q -- source.txt
+if (cd "$tmp" && echo x > untracked.txt && GITHUB_WORKSPACE="$tmp/workspace" GITHUB_SHA="$source_sha" bash -e -c "$guard"); then
+  echo 'same-repository guard accepted an untracked file' >&2
+  exit 1
+fi
+rm -f "$tmp/untracked.txt"
 mkdir "$tmp/plain"
 if (cd "$tmp" && GITHUB_WORKSPACE="$tmp/plain" GITHUB_SHA="$source_sha" bash -e -c "$guard"); then
   echo 'same-repository guard accepted a non-symlink workspace' >&2
